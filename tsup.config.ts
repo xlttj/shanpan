@@ -8,6 +8,7 @@ export default defineConfig({
   clean: true,
   sourcemap: true,
   dts: false,
+  external: ['tree-sitter', 'tree-sitter-typescript', 'tree-sitter-php'],
   banner: {
     js: '#!/usr/bin/env node',
   },

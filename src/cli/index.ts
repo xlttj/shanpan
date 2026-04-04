@@ -4,6 +4,7 @@ import { runStatus } from './commands/status.js';
 import { runIndex } from './commands/index-specs.js';
 import { runQuery } from './commands/query.js';
 import { runMcp } from './commands/mcp.js';
+import { runAnalyze } from './commands/analyze.js';
 
 const program = new Command();
 
@@ -38,6 +39,20 @@ program
   .command('mcp')
   .description('Start MCP server (stdio)')
   .action(() => runMcp());
+
+program
+  .command('analyze')
+  .description('Scan source files, extract code symbols, and link to specs')
+  .option('--include <dirs...>', 'Directories to scan (overrides config)')
+  .option('--exclude <dirs...>', 'Directory names to skip (overrides config)')
+  .option('--languages <langs...>', 'Languages to parse: typescript, php (overrides config)')
+  .action((opts) =>
+    runAnalyze({
+      include: opts.include as string[] | undefined,
+      exclude: opts.exclude as string[] | undefined,
+      languages: opts.languages as string[] | undefined,
+    }),
+  );
 
 program.parseAsync(process.argv).catch((err: Error) => {
   console.error(err.message);
