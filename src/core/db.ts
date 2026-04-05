@@ -4,12 +4,15 @@ import fs from 'node:fs';
 import { SCHEMA_STATEMENTS, DROP_ORDER } from './schema.js';
 
 export const DB_DIR = '.specgraph';
+export const DB_FILE = 'graph.db';
 
 export async function openDatabase(
   projectDir: string,
   readOnly = false,
 ): Promise<{ db: Database; conn: Connection }> {
-  const dbPath = path.join(projectDir, DB_DIR);
+  const dir = path.join(projectDir, DB_DIR);
+  fs.mkdirSync(dir, { recursive: true });
+  const dbPath = path.join(dir, DB_FILE);
   const db = new Database(dbPath, undefined, undefined, readOnly);
   await db.init();
   const conn = new Connection(db);
@@ -71,9 +74,9 @@ export async function queryAll(
 }
 
 export function getDbPath(projectDir: string): string {
-  return path.join(projectDir, DB_DIR);
+  return path.join(projectDir, DB_DIR, DB_FILE);
 }
 
 export function dbExists(projectDir: string): boolean {
-  return fs.existsSync(path.join(projectDir, DB_DIR));
+  return fs.existsSync(path.join(projectDir, DB_DIR, DB_FILE));
 }

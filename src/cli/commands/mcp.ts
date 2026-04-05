@@ -9,7 +9,7 @@ import {
 import { openDatabase, closeDatabase, dbExists, queryAll } from '../../core/db.js';
 import { loadConfig } from '../../core/config.js';
 import { parseSpecFile, findSpecFiles } from '../../core/parser.js';
-import { createSpec, ALLOWED_SPEC_TYPES } from '../../core/spec-writer.js';
+import { createSpec, updateSpec, ALLOWED_SPEC_TYPES } from '../../core/spec-writer.js';
 
 const MUTATING_KEYWORDS = /^\s*(CREATE|MERGE|SET|DELETE|REMOVE|DROP|ALTER|CALL)\b/i;
 
@@ -124,6 +124,28 @@ export async function runMcp(): Promise<void> {
           required: ['id', 'title', 'type'],
         },
       },
+      {
+        name: 'update_spec',
+        description: 'Add/remove symbol links or change the status of an existing spec',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            id: { type: 'string', description: 'Spec ID to update' },
+            addSymbols: {
+              type: 'array',
+              items: { type: 'string' },
+              description: 'Symbol IDs to add to implements',
+            },
+            removeSymbols: {
+              type: 'array',
+              items: { type: 'string' },
+              description: 'Symbol IDs to remove from implements',
+            },
+            status: { type: 'string', description: 'New status value' },
+          },
+          required: ['id'],
+        },
+      },
     ],
   }));
 
@@ -131,7 +153,7 @@ export async function runMcp(): Promise<void> {
     const { name, arguments: args } = request.params;
     const a = (args ?? {}) as Record<string, unknown>;
 
-    if (!dbExists(projectDir) && name !== 'create_spec') {
+    if (!dbExists(projectDir) && name !== 'create_spec' && name !== 'update_spec') {
       return textResult('No SpecGraph database found. Run `specgraph init` first.');
     }
 
@@ -282,6 +304,27 @@ export async function runMcp(): Promise<void> {
           specsDir,
         });
         return textResult(`Created ${path.relative(projectDir, filePath)}`);
+      } catch (err) {
+        return textResult(`Error: ${(err as Error).message}`);
+      }
+    }
+
+    if (name === 'update_spec') {
+      const config = loadConfig(projectDir);
+      const specsDir = path.resolve(projectDir, config.specsDir);
+      const addSymbolIds = Array.isArray(a['addSymbols']) ? (a['addSymbols'] as string[]) : [];
+      const addSymbols = addSymbolIds.map((s) => ({ symbol: s, type: 'unknown' }));
+      try {
+        const { filePath } = updateSpec({
+          id: String(a['id'] ?? ''),
+          specsDir,
+          addSymbols: addSymbols.length > 0 ? addSymbols : undefined,
+          removeSymbols: Array.isArray(a['removeSymbols'])
+            ? (a['removeSymbols'] as string[])
+            : undefined,
+          status: a['status'] !== undefined ? String(a['status']) : undefined,
+        });
+        return textResult(`Updated ${path.relative(projectDir, filePath)}`);
       } catch (err) {
         return textResult(`Error: ${(err as Error).message}`);
       }

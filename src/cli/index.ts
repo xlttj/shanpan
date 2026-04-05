@@ -6,6 +6,7 @@ import { runQuery } from './commands/query.js';
 import { runMcp } from './commands/mcp.js';
 import { runAnalyze } from './commands/analyze.js';
 import { runCreate } from './commands/create.js';
+import { runUpdate } from './commands/update.js';
 import { runCheck } from './commands/check.js';
 
 const program = new Command();
@@ -73,6 +74,22 @@ program
       symbols: opts.symbol as string[] | undefined,
       dependsOn: opts.dependsOn as string[] | undefined,
       derivesFrom: opts.derivesFrom as string[] | undefined,
+    }),
+  );
+
+program
+  .command('update')
+  .description('Update an existing spec (add/remove symbol links, change status)')
+  .requiredOption('--id <id>', 'Spec ID to update')
+  .option('--add-symbol <ids...>', 'Symbol IDs to add to implements')
+  .option('--remove-symbol <ids...>', 'Symbol IDs to remove from implements')
+  .option('--status <status>', 'New status value')
+  .action((opts) =>
+    runUpdate({
+      id: opts.id as string,
+      addSymbols: opts.addSymbol as string[] | undefined,
+      removeSymbols: opts.removeSymbol as string[] | undefined,
+      status: opts.status as string | undefined,
     }),
   );
 

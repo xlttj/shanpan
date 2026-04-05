@@ -41,7 +41,7 @@ describe('runMcp export', () => {
 
 // ─── create_spec via spec-writer (used by MCP create_spec tool) ───────────────
 
-import { createSpec, ALLOWED_SPEC_TYPES } from '../src/core/spec-writer.js';
+import { createSpec, updateSpec, ALLOWED_SPEC_TYPES } from '../src/core/spec-writer.js';
 import { parseSpecFile } from '../src/core/parser.js';
 
 let tmpDir: string;
@@ -93,6 +93,32 @@ describe('create_spec tool logic (via spec-writer)', () => {
   });
 });
 
+// ─── update_spec tool logic (via spec-writer) ─────────────────────────────────
+
+describe('update_spec tool logic (via updateSpec)', () => {
+  it('updates status of an existing spec', () => {
+    createSpec({ id: 'MCP-UPDATE-001', title: 'U1', type: 'intent', specsDir: tmpDir });
+    const { filePath } = updateSpec({
+      id: 'MCP-UPDATE-001',
+      specsDir: tmpDir,
+      status: 'active',
+    });
+    const parsed = parseSpecFile(filePath);
+    expect(parsed.frontmatter.status).toBe('active');
+  });
+
+  it('adds symbol links to a spec', () => {
+    createSpec({ id: 'MCP-UPDATE-002', title: 'U2', type: 'intent', specsDir: tmpDir });
+    updateSpec({
+      id: 'MCP-UPDATE-002',
+      specsDir: tmpDir,
+      addSymbols: [{ symbol: 'src/core/db.ts::openDatabase', type: 'function' }],
+    });
+    const parsed = parseSpecFile(path.join(tmpDir, 'mcp-update-002.md'));
+    expect(parsed.frontmatter.implements?.[0]?.symbol).toBe('src/core/db.ts::openDatabase');
+  });
+});
+
 // ─── Tool list completeness ───────────────────────────────────────────────────
 
 describe('MCP tool list', () => {
@@ -106,6 +132,7 @@ describe('MCP tool list', () => {
     'get_drift_report',
     'query_graph',
     'create_spec',
+    'update_spec',
   ];
 
   it('mcp.ts contains all expected tool names', async () => {

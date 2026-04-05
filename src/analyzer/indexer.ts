@@ -25,7 +25,7 @@ function esc(value: string | null | undefined): string {
 async function upsertCodeSymbol(conn: Connection, symbol: CodeSymbol): Promise<void> {
   // Use MERGE-like pattern: delete existing then create
   await conn.query(
-    `MATCH (c:CodeSymbol {id: ${esc(symbol.id)}}) DELETE c`,
+    `MATCH (c:CodeSymbol {id: ${esc(symbol.id)}}) DETACH DELETE c`,
   );
   const result = await conn.query(`CREATE (:CodeSymbol {
     id: ${esc(symbol.id)},

@@ -28,7 +28,7 @@ export function loadConfig(projectDir: string): SpecGraphConfig {
 
 export function saveConfig(projectDir: string, config: SpecGraphConfig): void {
   const dirPath = path.join(projectDir, DB_DIR);
-  fs.mkdirSync(dirPath, { recursive: true });
+  fs.mkdirSync(dirPath, { recursive: true }); // ensure dir exists even before DB init
   const configPath = path.join(dirPath, CONFIG_FILE);
   fs.writeFileSync(configPath, JSON.stringify(config, null, 2), 'utf-8');
 }

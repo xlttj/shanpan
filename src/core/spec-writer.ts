@@ -1,11 +1,13 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import matter from 'gray-matter';
+import { findSpecFiles, parseSpecFile } from './parser.js';
 
 export const ALLOWED_SPEC_TYPES = [
   'intent',
   'business_rule',
   'software_requirement',
+  'project_spec',
 ] as const;
 
 export type SpecType = (typeof ALLOWED_SPEC_TYPES)[number];
@@ -75,4 +77,82 @@ export function createSpec(options: CreateSpecOptions): CreateSpecResult {
   fs.writeFileSync(filePath, content, 'utf-8');
 
   return { filePath };
+}
+
+export interface UpdateSpecOptions {
+  id: string;
+  specsDir: string;
+  /** Symbol IDs to append to implements (no duplicates) */
+  addSymbols?: Array<{ symbol: string; type: string }>;
+  /** Symbol IDs to remove from implements */
+  removeSymbols?: string[];
+  /** Overwrite the status field */
+  status?: string;
+}
+
+/**
+ * Update an existing spec file in place. Finds the file by scanning specsDir
+ * for a matching `id` field, then applies the requested mutations while
+ * preserving the markdown body exactly.
+ *
+ * Throws if no spec with the given ID is found.
+ */
+export function updateSpec(options: UpdateSpecOptions): { filePath: string } {
+  const { id, specsDir, addSymbols, removeSymbols, status } = options;
+
+  // Scan to find the file whose frontmatter.id matches
+  const files = findSpecFiles(specsDir);
+  let targetPath: string | undefined;
+  for (const filePath of files) {
+    try {
+      const parsed = parseSpecFile(filePath);
+      if (parsed.frontmatter.id === id) {
+        targetPath = filePath;
+        break;
+      }
+    } catch {
+      // skip malformed files
+    }
+  }
+
+  if (!targetPath) {
+    throw new Error(`Spec "${id}" not found in ${specsDir}`);
+  }
+
+  const raw = fs.readFileSync(targetPath, 'utf-8');
+  const file = matter(raw);
+
+  // Apply status change
+  if (status !== undefined) {
+    file.data['status'] = status;
+  }
+
+  // Apply symbol additions (dedup by symbol ID)
+  if (addSymbols && addSymbols.length > 0) {
+    const existing = (file.data['implements'] as Array<{ symbol: string; type: string }>) ?? [];
+    const existingIds = new Set(existing.map((e) => e.symbol));
+    for (const entry of addSymbols) {
+      if (!existingIds.has(entry.symbol)) {
+        existing.push(entry);
+        existingIds.add(entry.symbol);
+      }
+    }
+    file.data['implements'] = existing;
+  }
+
+  // Apply symbol removals
+  if (removeSymbols && removeSymbols.length > 0) {
+    const toRemove = new Set(removeSymbols);
+    const existing = (file.data['implements'] as Array<{ symbol: string }>) ?? [];
+    file.data['implements'] = existing.filter((e) => !toRemove.has(e.symbol));
+    // Remove the key entirely if empty
+    if ((file.data['implements'] as unknown[]).length === 0) {
+      delete file.data['implements'];
+    }
+  }
+
+  const updated = matter.stringify(file.content, file.data);
+  fs.writeFileSync(targetPath, updated, 'utf-8');
+
+  return { filePath: targetPath };
 }
