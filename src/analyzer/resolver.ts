@@ -7,6 +7,11 @@ export interface ImplementationLink {
   confidence: number;
 }
 
+export interface UnresolvedImplementation {
+  specId: string;
+  symbolId: string;
+}
+
 /**
  * Match extracted code symbols against the `implements` entries declared in
  * spec frontmatter. Returns a link for each symbol ID that is referenced by
@@ -32,4 +37,27 @@ export function resolveImplementations(
   }
 
   return links;
+}
+
+/**
+ * Returns all `implements` entries declared in specs that do NOT match any
+ * extracted code symbol. These indicate drift: the symbol was renamed, moved,
+ * or deleted since the spec was last updated.
+ */
+export function findUnresolvedImplementations(
+  symbols: CodeSymbol[],
+  specs: ParsedSpec[],
+): UnresolvedImplementation[] {
+  const symbolIds = new Set(symbols.map((s) => s.id));
+  const unresolved: UnresolvedImplementation[] = [];
+
+  for (const spec of specs) {
+    for (const impl of spec.frontmatter.implements ?? []) {
+      if (!symbolIds.has(impl.symbol)) {
+        unresolved.push({ specId: spec.frontmatter.id, symbolId: impl.symbol });
+      }
+    }
+  }
+
+  return unresolved;
 }

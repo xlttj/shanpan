@@ -6,13 +6,15 @@ import type { CodeSymbol } from '../types/code.js';
 import type { ParsedSpec } from '../types/spec.js';
 import { walkFiles } from './walker.js';
 import { getParserForExtension, getExtensionsForLanguages } from './languages/index.js';
-import { resolveImplementations } from './resolver.js';
+import { resolveImplementations, findUnresolvedImplementations } from './resolver.js';
 
 export interface AnalysisStats {
   filesScanned: number;
   symbolsFound: number;
   implementationsLinked: number;
   parseErrors: number;
+  unresolvedSymbols: number;
+  driftWarnings: string[];
 }
 
 function esc(value: string | null | undefined): string {
@@ -61,6 +63,8 @@ export async function analyzeAndIndex(
     symbolsFound: 0,
     implementationsLinked: 0,
     parseErrors: 0,
+    unresolvedSymbols: 0,
+    driftWarnings: [],
   };
 
   const extensions = getExtensionsForLanguages(config.analyze.languages);
@@ -101,6 +105,13 @@ export async function analyzeAndIndex(
     await linkImplementation(conn, link.symbolId, link.specId, link.confidence);
     stats.implementationsLinked++;
   }
+
+  // Detect drift: spec implements entries with no matching symbol
+  const unresolved = findUnresolvedImplementations(allSymbols, specs);
+  stats.unresolvedSymbols = unresolved.length;
+  stats.driftWarnings = unresolved.map(
+    (u) => `${u.specId}: ${u.symbolId} not found`,
+  );
 
   return stats;
 }

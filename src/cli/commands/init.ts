@@ -40,4 +40,10 @@ export async function runInit(options: { specsDir?: string }): Promise<void> {
   console.log(chalk.gray('  2. Run `specgraph index` to build the graph'));
   console.log(chalk.gray('  3. Run `specgraph analyze` to scan source code'));
   console.log(chalk.gray('  4. Run `specgraph status` to inspect the graph'));
+  console.log('');
+  console.log(chalk.gray('To enable the pre-commit hook:'));
+  console.log(chalk.gray('  echo "specgraph check --staged" >> .git/hooks/pre-commit'));
+  console.log(chalk.gray('  chmod +x .git/hooks/pre-commit'));
+  console.log('');
+  console.log(chalk.gray('To start the MCP server: specgraph mcp'));
 }

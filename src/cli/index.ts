@@ -5,6 +5,8 @@ import { runIndex } from './commands/index-specs.js';
 import { runQuery } from './commands/query.js';
 import { runMcp } from './commands/mcp.js';
 import { runAnalyze } from './commands/analyze.js';
+import { runCreate } from './commands/create.js';
+import { runCheck } from './commands/check.js';
 
 const program = new Command();
 
@@ -53,6 +55,32 @@ program
       languages: opts.languages as string[] | undefined,
     }),
   );
+
+program
+  .command('create')
+  .description('Create a new spec file')
+  .requiredOption('--id <id>', 'Spec ID, e.g. SPEC-042 or RULE-007')
+  .requiredOption('--title <title>', 'Human-readable title')
+  .requiredOption('--type <type>', 'intent | business_rule | software_requirement')
+  .option('--symbol <ids...>', 'Symbol IDs to link via implements')
+  .option('--depends-on <ids...>', 'Spec IDs this spec depends on')
+  .option('--derives-from <ids...>', 'Spec IDs this spec derives from')
+  .action((opts) =>
+    runCreate({
+      id: opts.id as string,
+      title: opts.title as string,
+      type: opts.type as string,
+      symbols: opts.symbol as string[] | undefined,
+      dependsOn: opts.dependsOn as string[] | undefined,
+      derivesFrom: opts.derivesFrom as string[] | undefined,
+    }),
+  );
+
+program
+  .command('check')
+  .description('Check for spec drift (use --staged in pre-commit hooks)')
+  .option('--staged', 'Check staged git changes for symbol deletions/renames')
+  .action((opts) => runCheck({ staged: !!opts.staged }));
 
 program.parseAsync(process.argv).catch((err: Error) => {
   console.error(err.message);

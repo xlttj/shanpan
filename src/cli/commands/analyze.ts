@@ -55,6 +55,13 @@ export async function runAnalyze(options: {
     if (stats.parseErrors > 0) {
       console.log(chalk.yellow(`  Parse errors: ${stats.parseErrors}`));
     }
+    if (stats.driftWarnings.length > 0) {
+      console.log('');
+      console.log(chalk.yellow('Drift warnings (symbol declared in spec but not found in code):'));
+      for (const w of stats.driftWarnings) {
+        console.log(chalk.yellow(`  ⚠ ${w}`));
+      }
+    }
   } finally {
     await closeDatabase(db, conn);
   }
