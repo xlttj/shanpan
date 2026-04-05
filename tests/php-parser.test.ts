@@ -66,3 +66,87 @@ describe('PhpParser', () => {
     expect(fqns).toContain('calculateTax');
   });
 });
+
+describe('PhpParser.extractCallRefs', () => {
+  it('extracts instantiation via new ClassName()', () => {
+    const source = `<?php
+class Service {
+  public function run() {
+    $m = new Product();
+  }
+}
+class Product {}
+`;
+    const symbols = parser.extractSymbols('src/Service.php', source);
+    const refs = parser.extractCallRefs!('src/Service.php', source, symbols);
+    const inst = refs.find((r) => r.kind === 'instantiation' && r.targetName === 'Product');
+    expect(inst).toBeDefined();
+    expect(inst?.callerSymbolId).toBe('src/Service.php::Service.run');
+  });
+
+  it('extracts static call via ClassName::method()', () => {
+    const source = `<?php
+class Handler {
+  public function handle() {
+    $r = Inventory::check();
+  }
+}
+`;
+    const symbols = parser.extractSymbols('src/Handler.php', source);
+    const refs = parser.extractCallRefs!('src/Handler.php', source, symbols);
+    const sc = refs.find((r) => r.kind === 'static_call' && r.targetName === 'Inventory.check');
+    expect(sc).toBeDefined();
+    expect(sc?.callerSymbolId).toBe('src/Handler.php::Handler.handle');
+  });
+
+  it('skips self:: and parent:: calls', () => {
+    const source = `<?php
+class Base {
+  public function init() {
+    self::boot();
+    parent::init();
+    static::setup();
+  }
+}
+`;
+    const symbols = parser.extractSymbols('src/Base.php', source);
+    const refs = parser.extractCallRefs!('src/Base.php', source, symbols);
+    expect(refs).toHaveLength(0);
+  });
+
+  it('handles qualified class names in new expression', () => {
+    const source = `<?php
+class Svc {
+  public function run() {
+    $x = new \\App\\Models\\User();
+  }
+}
+`;
+    const symbols = parser.extractSymbols('src/Svc.php', source);
+    const refs = parser.extractCallRefs!('src/Svc.php', source, symbols);
+    const inst = refs.find((r) => r.kind === 'instantiation' && r.targetName === 'User');
+    expect(inst).toBeDefined();
+  });
+
+  it('returns empty array when no calls exist', () => {
+    const source = `<?php\nclass Empty {}\n`;
+    const symbols = parser.extractSymbols('src/Empty.php', source);
+    const refs = parser.extractCallRefs!('src/Empty.php', source, symbols);
+    expect(refs).toHaveLength(0);
+  });
+
+  it('sets line numbers on call refs', () => {
+    const source = `<?php
+class A {
+  public function go() {
+    $b = new B();
+  }
+}
+class B {}
+`;
+    const symbols = parser.extractSymbols('src/A.php', source);
+    const refs = parser.extractCallRefs!('src/A.php', source, symbols);
+    const inst = refs.find((r) => r.targetName === 'B');
+    expect(inst?.line).toBeGreaterThan(0);
+  });
+});

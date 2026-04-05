@@ -175,12 +175,13 @@ export async function getGraphStats(conn: Connection): Promise<{
     countNode('CodeSymbol'),
   ]);
 
-  const [dependsOn, derivesFrom, defines, constrains, implements_] = await Promise.all([
+  const [dependsOn, derivesFrom, defines, constrains, implements_, calls] = await Promise.all([
     countRel('DEPENDS_ON'),
     countRel('DERIVES_FROM'),
     countRel('DEFINES'),
     countRel('CONSTRAINS'),
     countRel('IMPLEMENTS'),
+    countRel('CALLS'),
   ]);
 
   return {
@@ -193,6 +194,7 @@ export async function getGraphStats(conn: Connection): Promise<{
       DEFINES: defines,
       CONSTRAINS: constrains,
       IMPLEMENTS: implements_,
+      CALLS: calls,
     },
   };
 }

@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import type { Connection } from '@ladybugdb/core';
 import type { SpecGraphConfig } from '../types/config.js';
-import type { CodeSymbol } from '../types/code.js';
+import type { CodeSymbol, CallRef } from '../types/code.js';
 import type { ParsedSpec } from '../types/spec.js';
 import { walkFiles } from './walker.js';
 import { getParserForExtension, getExtensionsForLanguages } from './languages/index.js';
@@ -12,6 +12,7 @@ export interface AnalysisStats {
   filesScanned: number;
   symbolsFound: number;
   implementationsLinked: number;
+  callEdgesCreated: number;
   parseErrors: number;
   unresolvedSymbols: number;
   driftWarnings: string[];
@@ -39,6 +40,33 @@ async function upsertCodeSymbol(conn: Connection, symbol: CodeSymbol): Promise<v
   if (result && !Array.isArray(result)) result.close();
 }
 
+/**
+ * Resolve a targetName (e.g. "SomeClass" or "SomeClass.method") against the
+ * full set of extracted symbols. Tries exact FQN match first, then suffix match
+ * for namespaced PHP classes (e.g. "Product" matches "App.Models.Product").
+ */
+function resolveCallTarget(targetName: string, symbols: CodeSymbol[]): CodeSymbol | null {
+  // Exact match
+  const exact = symbols.find((s) => s.fqn === targetName);
+  if (exact) return exact;
+  // Suffix match — handles namespace-qualified FQNs
+  const suffix = `.${targetName}`;
+  return symbols.find((s) => s.fqn.endsWith(suffix)) ?? null;
+}
+
+async function linkCall(
+  conn: Connection,
+  callerSymbolId: string,
+  targetSymbolId: string,
+  callKind: string,
+): Promise<void> {
+  const result = await conn.query(
+    `MATCH (caller:CodeSymbol {id: ${esc(callerSymbolId)}}), (target:CodeSymbol {id: ${esc(targetSymbolId)}})
+     CREATE (caller)-[:CALLS {call_kind: ${esc(callKind)}}]->(target)`,
+  );
+  if (result && !Array.isArray(result)) result.close();
+}
+
 async function linkImplementation(
   conn: Connection,
   symbolId: string,
@@ -62,6 +90,7 @@ export async function analyzeAndIndex(
     filesScanned: 0,
     symbolsFound: 0,
     implementationsLinked: 0,
+    callEdgesCreated: 0,
     parseErrors: 0,
     unresolvedSymbols: 0,
     driftWarnings: [],
@@ -76,6 +105,7 @@ export async function analyzeAndIndex(
   const files = walkFiles(includeDirs, extensions, config.analyze.exclude);
 
   const allSymbols: CodeSymbol[] = [];
+  const allCallRefs: CallRef[] = [];
 
   for (const filePath of files) {
     stats.filesScanned++;
@@ -89,6 +119,11 @@ export async function analyzeAndIndex(
       const symbols = parser.extractSymbols(relPath, source);
       allSymbols.push(...symbols);
       stats.symbolsFound += symbols.length;
+
+      if (parser.extractCallRefs) {
+        const callRefs = parser.extractCallRefs(relPath, source, symbols);
+        allCallRefs.push(...callRefs);
+      }
     } catch {
       stats.parseErrors++;
     }
@@ -104,6 +139,15 @@ export async function analyzeAndIndex(
   for (const link of links) {
     await linkImplementation(conn, link.symbolId, link.specId, link.confidence);
     stats.implementationsLinked++;
+  }
+
+  // Resolve call refs and create CALLS edges
+  for (const ref of allCallRefs) {
+    const target = resolveCallTarget(ref.targetName, allSymbols);
+    if (target) {
+      await linkCall(conn, ref.callerSymbolId, target.id, ref.kind);
+      stats.callEdgesCreated++;
+    }
   }
 
   // Detect drift: spec implements entries with no matching symbol

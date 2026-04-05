@@ -74,3 +74,76 @@ describe('TypeScriptParser', () => {
     expect(fqns).toContain('UserRole');
   });
 });
+
+describe('TypeScriptParser.extractCallRefs', () => {
+  it('extracts instantiation via new ClassName()', () => {
+    const src = `export class OrderService {
+  process() {
+    const p = new Product();
+  }
+}
+export class Product {}
+`;
+    const symbols = parser.extractSymbols('src/order.ts', src);
+    const refs = parser.extractCallRefs!('src/order.ts', src, symbols);
+    const inst = refs.find((r) => r.kind === 'instantiation' && r.targetName === 'Product');
+    expect(inst).toBeDefined();
+    expect(inst?.callerSymbolId).toBe('src/order.ts::OrderService.process');
+  });
+
+  it('extracts static call via Identifier.method()', () => {
+    const src = `export class Handler {
+  handle() {
+    const r = Inventory.check(x);
+  }
+}
+`;
+    const symbols = parser.extractSymbols('src/handler.ts', src);
+    const refs = parser.extractCallRefs!('src/handler.ts', src, symbols);
+    const sc = refs.find((r) => r.kind === 'static_call' && r.targetName === 'Inventory.check');
+    expect(sc).toBeDefined();
+    expect(sc?.callerSymbolId).toBe('src/handler.ts::Handler.handle');
+  });
+
+  it('skips this.method() calls', () => {
+    const src = `export class A {
+  run() { this.init(); }
+  init() {}
+}
+`;
+    const symbols = parser.extractSymbols('src/a.ts', src);
+    const refs = parser.extractCallRefs!('src/a.ts', src, symbols);
+    expect(refs.every((r) => !r.targetName.startsWith('this.'))).toBe(true);
+  });
+
+  it('skips super.method() calls', () => {
+    const src = `export class Child extends Base {
+  run() { super.run(); }
+}
+`;
+    const symbols = parser.extractSymbols('src/child.ts', src);
+    const refs = parser.extractCallRefs!('src/child.ts', src, symbols);
+    expect(refs).toHaveLength(0);
+  });
+
+  it('returns empty array when no calls exist', () => {
+    const src = `export class Empty {}`;
+    const symbols = parser.extractSymbols('src/empty.ts', src);
+    const refs = parser.extractCallRefs!('src/empty.ts', src, symbols);
+    expect(refs).toHaveLength(0);
+  });
+
+  it('sets line numbers on call refs', () => {
+    const src = `export class A {
+  go() {
+    const b = new B();
+  }
+}
+export class B {}
+`;
+    const symbols = parser.extractSymbols('src/a.ts', src);
+    const refs = parser.extractCallRefs!('src/a.ts', src, symbols);
+    const inst = refs.find((r) => r.targetName === 'B');
+    expect(inst?.line).toBeGreaterThan(0);
+  });
+});

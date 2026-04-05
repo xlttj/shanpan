@@ -1,6 +1,6 @@
 import { createRequire } from 'module';
 import type Parser from 'tree-sitter';
-import type { CodeSymbol, SymbolKind } from '../../types/code.js';
+import type { CodeSymbol, SymbolKind, CallRef } from '../../types/code.js';
 import type { LanguageParser } from './parser.js';
 
 const require = createRequire(import.meta.url);
@@ -104,6 +104,67 @@ function walkNode(
   }
 }
 
+function findEnclosingSymbol(symbols: CodeSymbol[], line: number): CodeSymbol | null {
+  let best: CodeSymbol | null = null;
+  let bestRange = Infinity;
+  for (const sym of symbols) {
+    if (sym.lineStart <= line && line <= sym.lineEnd) {
+      const range = sym.lineEnd - sym.lineStart;
+      if (range < bestRange) {
+        bestRange = range;
+        best = sym;
+      }
+    }
+  }
+  return best;
+}
+
+function collectCallRefs(
+  node: Parser.SyntaxNode,
+  symbols: CodeSymbol[],
+  results: CallRef[],
+): void {
+  if (node.type === 'new_expression') {
+    const ctorNode = node.childForFieldName('constructor');
+    // Only handle simple identifier — not `new this.Foo()` etc.
+    if (ctorNode?.type === 'identifier') {
+      const line = node.startPosition.row + 1;
+      const enclosing = findEnclosingSymbol(symbols, line);
+      if (enclosing) {
+        results.push({
+          callerSymbolId: enclosing.id,
+          targetName: ctorNode.text,
+          kind: 'instantiation',
+          line,
+        });
+      }
+    }
+  } else if (node.type === 'call_expression') {
+    const funcNode = node.childForFieldName('function');
+    if (funcNode?.type === 'member_expression') {
+      const objNode = funcNode.childForFieldName('object');
+      const propNode = funcNode.childForFieldName('property');
+      // Only handle simple identifiers — skip `this.foo()`, `super.foo()`
+      if (objNode?.type === 'identifier' && propNode) {
+        const line = node.startPosition.row + 1;
+        const enclosing = findEnclosingSymbol(symbols, line);
+        if (enclosing) {
+          results.push({
+            callerSymbolId: enclosing.id,
+            targetName: `${objNode.text}.${propNode.text}`,
+            kind: 'static_call',
+            line,
+          });
+        }
+      }
+    }
+  }
+
+  for (const child of node.namedChildren) {
+    collectCallRefs(child, symbols, results);
+  }
+}
+
 export class TypeScriptParser implements LanguageParser {
   readonly name = 'typescript';
   readonly extensions = ['.ts', '.tsx', '.mts', '.cts'];
@@ -123,6 +184,17 @@ export class TypeScriptParser implements LanguageParser {
     const tree = this._parser.parse(source);
     const results: CodeSymbol[] = [];
     walkNode(tree.rootNode, filePath, 'typescript', null, results);
+    return results;
+  }
+
+  extractCallRefs(filePath: string, source: string, symbols: CodeSymbol[]): CallRef[] {
+    const ext = filePath.split('.').pop() ?? '';
+    const lang = ext === 'tsx' || ext === 'jsx' ? TSLanguage.tsx : TSLanguage.typescript;
+    this._parser.setLanguage(lang);
+
+    const tree = this._parser.parse(source);
+    const results: CallRef[] = [];
+    collectCallRefs(tree.rootNode, symbols, results);
     return results;
   }
 }

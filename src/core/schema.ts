@@ -39,10 +39,15 @@ export const SCHEMA_STATEMENTS = [
     verified_at TIMESTAMP,
     verified_by STRING
   )`,
+  `CREATE REL TABLE CALLS (
+    FROM CodeSymbol TO CodeSymbol,
+    call_kind STRING
+  )`,
 ];
 
 /** Tables to drop in dependency order (edges before nodes) */
 export const DROP_ORDER = [
+  'CALLS',
   'IMPLEMENTS',
   'CONSTRAINS',
   'DEFINES',

@@ -52,6 +52,7 @@ export async function runAnalyze(options: {
     console.log(`  ${chalk.cyan('Files scanned')}         ${stats.filesScanned}`);
     console.log(`  ${chalk.cyan('Symbols found')}         ${stats.symbolsFound}`);
     console.log(`  ${chalk.cyan('Implementations linked')} ${stats.implementationsLinked}`);
+    console.log(`  ${chalk.cyan('Call edges created')}    ${stats.callEdgesCreated}`);
     if (stats.parseErrors > 0) {
       console.log(chalk.yellow(`  Parse errors: ${stats.parseErrors}`));
     }

@@ -25,3 +25,18 @@ export interface ExtractionResult {
   symbols: CodeSymbol[];
   error?: string;
 }
+
+export type CallKind = 'static_call' | 'instantiation';
+
+export interface CallRef {
+  /** ID of the symbol that contains this call (already resolved) */
+  callerSymbolId: string;
+  /**
+   * Unresolved target name. For static calls: "ClassName.methodName".
+   * For instantiation: "ClassName".
+   */
+  targetName: string;
+  kind: CallKind;
+  /** 1-based line number of the call expression */
+  line: number;
+}
