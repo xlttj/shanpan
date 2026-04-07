@@ -8,8 +8,9 @@ import {
 } from '@modelcontextprotocol/sdk/types.js';
 import { openDatabase, closeDatabase, dbExists, queryAll } from '../../core/db.js';
 import { loadConfig } from '../../core/config.js';
-import { parseSpecFile, findSpecFiles } from '../../core/parser.js';
+import { parseSpecFile, findSpecFiles, parseAllSpecs } from '../../core/parser.js';
 import { createSpec, updateSpec, ALLOWED_SPEC_TYPES } from '../../core/spec-writer.js';
+import { indexSpecs } from '../../core/indexer.js';
 
 const MUTATING_KEYWORDS = /^\s*(CREATE|MERGE|SET|DELETE|REMOVE|DROP|ALTER|CALL)\b/i;
 
@@ -145,6 +146,28 @@ export async function runMcp(): Promise<void> {
           },
           required: ['id'],
         },
+      },
+      {
+        name: 'get_unspecced_symbols',
+        description:
+          'List CodeSymbol nodes that have no IMPLEMENTS edge — symbols not yet covered by any spec. Optionally filter by file path.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            file_path: {
+              type: 'string',
+              description:
+                'Optional — filter to symbols in a specific file (relative path from project root)',
+            },
+          },
+          required: [],
+        },
+      },
+      {
+        name: 'reindex',
+        description:
+          'Re-parse all spec files and rebuild the graph database. Use after creating or updating spec files within an MCP session.',
+        inputSchema: { type: 'object', properties: {} },
       },
     ],
   }));
@@ -327,6 +350,42 @@ export async function runMcp(): Promise<void> {
         return textResult(`Updated ${path.relative(projectDir, filePath)}`);
       } catch (err) {
         return textResult(`Error: ${(err as Error).message}`);
+      }
+    }
+
+    if (name === 'get_unspecced_symbols') {
+      const filePath = a['file_path'] !== undefined ? String(a['file_path']) : undefined;
+      const { db, conn } = await openDatabase(projectDir, true);
+      try {
+        let cypher =
+          'MATCH (c:CodeSymbol) WHERE NOT EXISTS { MATCH (c)-[:IMPLEMENTS]->() }';
+        if (filePath !== undefined) {
+          const safe = filePath.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+          cypher += ` AND c.file_path = '${safe}'`;
+        }
+        cypher +=
+          ' RETURN c.id AS id, c.fqn AS fqn, c.symbol_type AS kind, c.file_path AS file_path ORDER BY c.file_path, c.fqn';
+        const { rows } = await queryAll(conn, cypher);
+        return jsonResult(rows);
+      } finally {
+        await closeDatabase(db, conn);
+      }
+    }
+
+    if (name === 'reindex') {
+      const config = loadConfig(projectDir);
+      const specsDir = path.resolve(projectDir, config.specsDir);
+      const { specs, errors } = parseAllSpecs(specsDir);
+      const { db, conn } = await openDatabase(projectDir);
+      try {
+        const stats = await indexSpecs(conn, specs);
+        const lines = [
+          `✓ Reindexed: ${stats.specs} specs, ${stats.symbols} symbols, ${stats.implements} IMPLEMENTS edges`,
+        ];
+        if (errors.length > 0) lines.push(`Warnings: ${errors.join('; ')}`);
+        return textResult(lines.join('\n'));
+      } finally {
+        await closeDatabase(db, conn);
       }
     }
 

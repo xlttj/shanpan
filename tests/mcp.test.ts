@@ -42,7 +42,10 @@ describe('runMcp export', () => {
 // ─── create_spec via spec-writer (used by MCP create_spec tool) ───────────────
 
 import { createSpec, updateSpec, ALLOWED_SPEC_TYPES } from '../src/core/spec-writer.js';
-import { parseSpecFile } from '../src/core/parser.js';
+import { parseSpecFile, parseAllSpecs } from '../src/core/parser.js';
+import { openDatabase, closeDatabase } from '../src/core/db.js';
+import { indexSpecs } from '../src/core/indexer.js';
+import type { Database, Connection } from '@ladybugdb/core';
 
 let tmpDir: string;
 
@@ -133,6 +136,8 @@ describe('MCP tool list', () => {
     'query_graph',
     'create_spec',
     'update_spec',
+    'get_unspecced_symbols',
+    'reindex',
   ];
 
   it('mcp.ts contains all expected tool names', async () => {
@@ -142,6 +147,113 @@ describe('MCP tool list', () => {
     );
     for (const tool of EXPECTED_TOOLS) {
       expect(mcpSrc).toContain(`name: '${tool}'`);
+    }
+  });
+});
+
+// ─── get_unspecced_symbols logic ──────────────────────────────────────────────
+
+describe('get_unspecced_symbols tool logic', () => {
+  let db: Database;
+  let conn: Connection;
+  let dbDir: string;
+
+  beforeEach(async () => {
+    dbDir = fs.mkdtempSync(path.join(os.tmpdir(), 'specgraph-unspecced-'));
+    ({ db, conn } = await openDatabase(dbDir));
+    // indexSpecs calls dropAndRecreateSchema internally
+    await indexSpecs(conn, []);
+  });
+
+  afterEach(async () => {
+    await closeDatabase(db, conn);
+    fs.rmSync(dbDir, { recursive: true, force: true });
+  });
+
+  async function insertSymbol(id: string, filePath: string): Promise<void> {
+    const fqn = id.split('::')[1] ?? id;
+    const r = await conn.query(
+      `CREATE (:CodeSymbol { id: '${id}', fqn: '${fqn}', symbol_type: 'function', file_path: '${filePath}', line_start: 0, line_end: 0, language: 'typescript' })`,
+    );
+    if (!Array.isArray(r)) r.close();
+  }
+
+  it('returns symbols with no IMPLEMENTS edge', async () => {
+    // one specced symbol (via indexSpecs), one raw unspecced symbol
+    await indexSpecs(conn, [{
+      frontmatter: { id: 'S1', title: 'S1', type: 'intent', status: 'draft', implements: [{ symbol: 'src/a.ts::covered', type: 'function' }] },
+      content: '',
+      filePath: '/fake/s1.md',
+    }]);
+    await insertSymbol('src/b.ts::unspecced', 'src/b.ts');
+
+    const { queryAll: qa } = await import('../src/core/db.js');
+    const { rows } = await qa(
+      conn,
+      `MATCH (c:CodeSymbol) WHERE NOT EXISTS { MATCH (c)-[:IMPLEMENTS]->() }
+       RETURN c.id AS id ORDER BY c.id`,
+    );
+    expect(rows.map((r) => r['id'])).toContain('src/b.ts::unspecced');
+    expect(rows.map((r) => r['id'])).not.toContain('src/a.ts::covered');
+  });
+
+  it('returns empty array when all symbols have IMPLEMENTS edges', async () => {
+    await indexSpecs(conn, [{
+      frontmatter: { id: 'S2', title: 'S2', type: 'intent', status: 'draft', implements: [{ symbol: 'src/a.ts::covered', type: 'function' }] },
+      content: '',
+      filePath: '/fake/s2.md',
+    }]);
+
+    const { queryAll: qa } = await import('../src/core/db.js');
+    const { rows } = await qa(
+      conn,
+      `MATCH (c:CodeSymbol) WHERE NOT EXISTS { MATCH (c)-[:IMPLEMENTS]->() } RETURN c.id AS id`,
+    );
+    expect(rows).toHaveLength(0);
+  });
+
+  it('filters by file_path when provided', async () => {
+    await insertSymbol('src/x.ts::alpha', 'src/x.ts');
+    await insertSymbol('src/y.ts::beta', 'src/y.ts');
+
+    const { queryAll: qa } = await import('../src/core/db.js');
+    const fp = 'src/x.ts';
+    const safe = fp.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+    const { rows } = await qa(
+      conn,
+      `MATCH (c:CodeSymbol) WHERE NOT EXISTS { MATCH (c)-[:IMPLEMENTS]->() } AND c.file_path = '${safe}' RETURN c.id AS id`,
+    );
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.['id']).toBe('src/x.ts::alpha');
+  });
+});
+
+// ─── reindex logic ────────────────────────────────────────────────────────────
+
+describe('reindex tool logic', () => {
+  it('parseAllSpecs + indexSpecs returns correct stats for temp spec files', async () => {
+    createSpec({ id: 'RIDX-001', title: 'Reindex One', type: 'intent', specsDir: tmpDir });
+    createSpec({
+      id: 'RIDX-002',
+      title: 'Reindex Two',
+      type: 'business_rule',
+      symbols: ['src/core/db.ts::openDatabase'],
+      specsDir: tmpDir,
+    });
+
+    const { specs } = parseAllSpecs(tmpDir);
+    expect(specs).toHaveLength(2);
+
+    const dbDir = fs.mkdtempSync(path.join(os.tmpdir(), 'specgraph-reindex-'));
+    const { db, conn } = await openDatabase(dbDir);
+    try {
+      const stats = await indexSpecs(conn, specs);
+      expect(stats.specs).toBe(2);
+      expect(stats.symbols).toBe(1);
+      expect(stats.implements).toBe(1);
+    } finally {
+      await closeDatabase(db, conn);
+      fs.rmSync(dbDir, { recursive: true, force: true });
     }
   });
 });
