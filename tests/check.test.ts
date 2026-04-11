@@ -8,46 +8,64 @@ import os from 'node:os';
 // The key correctness concerns are: parsing git diff output and the Cypher
 // path-list escaping. We import and test them via a small test-only re-export.
 
-// Re-test the path parsing logic inline (mirrors check.ts getStagedRemovedPaths)
-function parseDiffOutput(output: string): string[] {
-  const paths: string[] = [];
+// Re-test the path parsing logic inline (mirrors check.ts getStagedChanges)
+function parseDiffOutput(output: string): { removed: string[]; modified: string[] } {
+  const removed: string[] = [];
+  const modified: string[] = [];
   for (const line of output.split('\n')) {
     const trimmed = line.trim();
     if (!trimmed) continue;
     const parts = trimmed.split('\t');
     const status = parts[0] ?? '';
     if (status === 'D') {
-      if (parts[1]) paths.push(parts[1]);
+      if (parts[1]) removed.push(parts[1]);
     } else if (status.startsWith('R')) {
-      if (parts[1]) paths.push(parts[1]);
+      if (parts[1]) removed.push(parts[1]);
+    } else if (status === 'M') {
+      if (parts[1]) modified.push(parts[1]);
     }
   }
-  return paths;
+  return { removed, modified };
 }
 
 describe('parseDiffOutput (staged change parsing)', () => {
-  it('collects deleted file paths', () => {
+  it('collects deleted file paths into removed', () => {
     const output = 'D\tsrc/foo.ts\nD\tsrc/bar.ts\n';
-    expect(parseDiffOutput(output)).toEqual(['src/foo.ts', 'src/bar.ts']);
+    expect(parseDiffOutput(output)).toEqual({ removed: ['src/foo.ts', 'src/bar.ts'], modified: [] });
   });
 
-  it('collects the old path for renames', () => {
+  it('collects the old path for renames into removed', () => {
     const output = 'R100\tsrc/old.ts\tsrc/new.ts\n';
-    expect(parseDiffOutput(output)).toEqual(['src/old.ts']);
+    expect(parseDiffOutput(output)).toEqual({ removed: ['src/old.ts'], modified: [] });
   });
 
-  it('ignores modified and added files', () => {
-    const output = 'M\tsrc/foo.ts\nA\tsrc/new.ts\n';
-    expect(parseDiffOutput(output)).toEqual([]);
+  it('collects modified files into modified, not removed', () => {
+    const output = 'M\tsrc/foo.ts\n';
+    expect(parseDiffOutput(output)).toEqual({ removed: [], modified: ['src/foo.ts'] });
   });
 
-  it('returns empty for empty output', () => {
-    expect(parseDiffOutput('')).toEqual([]);
+  it('ignores added files', () => {
+    const output = 'A\tsrc/new.ts\n';
+    expect(parseDiffOutput(output)).toEqual({ removed: [], modified: [] });
   });
 
-  it('handles mixed D and R entries', () => {
-    const output = 'D\tsrc/a.ts\nR90\tsrc/b.ts\tsrc/c.ts\nM\tsrc/d.ts\n';
-    expect(parseDiffOutput(output)).toEqual(['src/a.ts', 'src/b.ts']);
+  it('returns empty buckets for empty output', () => {
+    expect(parseDiffOutput('')).toEqual({ removed: [], modified: [] });
+  });
+
+  it('correctly splits D, R, and M into separate buckets', () => {
+    const output = 'D\tsrc/a.ts\nR90\tsrc/b.ts\tsrc/c.ts\nM\tsrc/d.ts\nA\tsrc/e.ts\n';
+    expect(parseDiffOutput(output)).toEqual({
+      removed: ['src/a.ts', 'src/b.ts'],
+      modified: ['src/d.ts'],
+    });
+  });
+
+  it('modified files do not cause a hard block (removed stays empty)', () => {
+    const output = 'M\tsrc/tracked.ts\n';
+    const { removed } = parseDiffOutput(output);
+    // removed must be empty — no exit-1 should be triggered
+    expect(removed).toHaveLength(0);
   });
 });
 

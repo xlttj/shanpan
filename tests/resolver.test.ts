@@ -2,7 +2,9 @@ import { describe, it, expect } from 'vitest';
 import {
   resolveImplementations,
   findUnresolvedImplementations,
+  suggestRenames,
 } from '../src/analyzer/resolver.js';
+import type { UnresolvedImplementation } from '../src/analyzer/resolver.js';
 import type { CodeSymbol } from '../src/types/code.js';
 import type { ParsedSpec } from '../src/types/spec.js';
 
@@ -131,5 +133,64 @@ describe('findUnresolvedImplementations', () => {
     ];
     const unresolved = findUnresolvedImplementations([], specs);
     expect(unresolved.map((u) => u.specId).sort()).toEqual(['SPEC-001', 'SPEC-002']);
+  });
+});
+
+// ─── suggestRenames ──────────────────────────────────────────────────────────
+
+function makeUnresolved(specId: string, symbolId: string): UnresolvedImplementation {
+  return { specId, symbolId };
+}
+
+describe('suggestRenames', () => {
+  it('suggests same_file_similar_fqn when method is renamed within same class', () => {
+    const unresolved = [makeUnresolved('SPEC-003', 'src/tax.php::Tax.calculateTax')];
+    const symbols = [makeSymbol('src/tax.php::Tax.computeTax')];
+    const suggestions = suggestRenames(unresolved, symbols);
+    expect(suggestions).toHaveLength(1);
+    expect(suggestions[0]).toMatchObject({
+      specId: 'SPEC-003',
+      oldSymbolId: 'src/tax.php::Tax.calculateTax',
+      suggestedSymbolId: 'src/tax.php::Tax.computeTax',
+      reason: 'same_file_similar_fqn',
+    });
+  });
+
+  it('suggests different_file_same_fqn when file is moved', () => {
+    const unresolved = [makeUnresolved('SPEC-005', 'src/old/Tax.php::Tax.calculateTax')];
+    const symbols = [makeSymbol('src/new/Tax.php::Tax.calculateTax')];
+    const suggestions = suggestRenames(unresolved, symbols);
+    expect(suggestions).toHaveLength(1);
+    expect(suggestions[0]).toMatchObject({
+      specId: 'SPEC-005',
+      oldSymbolId: 'src/old/Tax.php::Tax.calculateTax',
+      suggestedSymbolId: 'src/new/Tax.php::Tax.calculateTax',
+      reason: 'different_file_same_fqn',
+    });
+  });
+
+  it('returns empty array when there is no match', () => {
+    const unresolved = [makeUnresolved('SPEC-007', 'src/foo.php::Foo.bar')];
+    const symbols = [makeSymbol('src/other.php::Unrelated.method')];
+    expect(suggestRenames(unresolved, symbols)).toHaveLength(0);
+  });
+
+  it('different_file_same_fqn takes priority over same_file_similar_fqn', () => {
+    const unresolved = [makeUnresolved('SPEC-008', 'src/old.php::Tax.calculateTax')];
+    const symbols = [
+      makeSymbol('src/new.php::Tax.calculateTax'), // file moved (Pass 1)
+      makeSymbol('src/old.php::Tax.computeTax'),   // same-file rename (Pass 2)
+    ];
+    const suggestions = suggestRenames(unresolved, symbols);
+    expect(suggestions).toHaveLength(1);
+    expect(suggestions[0]?.reason).toBe('different_file_same_fqn');
+    expect(suggestions[0]?.suggestedSymbolId).toBe('src/new.php::Tax.calculateTax');
+  });
+
+  it('does not suggest for top-level functions (no dot in FQN)', () => {
+    // Top-level fn — Pass 2 is skipped; no file move either
+    const unresolved = [makeUnresolved('SPEC-009', 'src/helpers.php::calculateTax')];
+    const symbols = [makeSymbol('src/helpers.php::computeTax')];
+    expect(suggestRenames(unresolved, symbols)).toHaveLength(0);
   });
 });

@@ -57,10 +57,29 @@ export async function runAnalyze(options: {
       console.log(chalk.yellow(`  Parse errors: ${stats.parseErrors}`));
     }
     if (stats.driftWarnings.length > 0) {
+      // Build suggestion lookup keyed by "specId::symbolId"
+      const suggestionMap = new Map(
+        stats.renameSuggestions.map((s) => [`${s.specId}::${s.oldSymbolId}`, s]),
+      );
       console.log('');
       console.log(chalk.yellow('Drift warnings (symbol declared in spec but not found in code):'));
       for (const w of stats.driftWarnings) {
+        // w format: "SPEC-XXX: <symbolId> not found"
+        const colonIdx = w.indexOf(':');
+        const specId = w.slice(0, colonIdx);
+        const symbolId = w.slice(colonIdx + 2, w.lastIndexOf(' not found'));
         console.log(chalk.yellow(`  ⚠ ${w}`));
+        const suggestion = suggestionMap.get(`${specId}::${symbolId}`);
+        if (suggestion) {
+          const label =
+            suggestion.reason === 'different_file_same_fqn'
+              ? 'file moved, same name'
+              : 'same file, same class';
+          console.log(chalk.gray(`     → Did you rename to ${suggestion.suggestedSymbolId}? (${label})`));
+          console.log(chalk.gray(`       Fix: specgraph update --id ${specId} \\`));
+          console.log(chalk.gray(`                 --remove-symbol ${symbolId} \\`));
+          console.log(chalk.gray(`                 --add-symbol ${suggestion.suggestedSymbolId}`));
+        }
       }
     }
   } finally {

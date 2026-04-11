@@ -6,7 +6,8 @@ import type { CodeSymbol, CallRef } from '../types/code.js';
 import type { ParsedSpec } from '../types/spec.js';
 import { walkFiles } from './walker.js';
 import { getParserForExtension, getExtensionsForLanguages } from './languages/index.js';
-import { resolveImplementations, findUnresolvedImplementations } from './resolver.js';
+import { resolveImplementations, findUnresolvedImplementations, suggestRenames } from './resolver.js';
+import type { RenameSuggestion } from './resolver.js';
 
 export interface AnalysisStats {
   filesScanned: number;
@@ -16,6 +17,7 @@ export interface AnalysisStats {
   parseErrors: number;
   unresolvedSymbols: number;
   driftWarnings: string[];
+  renameSuggestions: RenameSuggestion[];
 }
 
 function esc(value: string | null | undefined): string {
@@ -94,6 +96,7 @@ export async function analyzeAndIndex(
     parseErrors: 0,
     unresolvedSymbols: 0,
     driftWarnings: [],
+    renameSuggestions: [],
   };
 
   const extensions = getExtensionsForLanguages(config.analyze.languages);
@@ -156,6 +159,7 @@ export async function analyzeAndIndex(
   stats.driftWarnings = unresolved.map(
     (u) => `${u.specId}: ${u.symbolId} not found`,
   );
+  stats.renameSuggestions = suggestRenames(unresolved, allSymbols);
 
   return stats;
 }

@@ -11,6 +11,8 @@ import { loadConfig } from '../../core/config.js';
 import { parseSpecFile, findSpecFiles, parseAllSpecs } from '../../core/parser.js';
 import { createSpec, updateSpec, ALLOWED_SPEC_TYPES } from '../../core/spec-writer.js';
 import { indexSpecs } from '../../core/indexer.js';
+import { suggestRenames } from '../../analyzer/resolver.js';
+import type { UnresolvedImplementation } from '../../analyzer/resolver.js';
 
 const MUTATING_KEYWORDS = /^\s*(CREATE|MERGE|SET|DELETE|REMOVE|DROP|ALTER|CALL)\b/i;
 
@@ -265,18 +267,29 @@ export async function runMcp(): Promise<void> {
       // Drift = spec implements entries whose symbol ID is not in the CodeSymbol table
       const { db, conn } = await openDatabase(projectDir, true);
       try {
-        // Get all known symbol IDs from DB
+        // Get all known symbols (id + fqn + file_path) for drift detection and suggestions
         const { rows: symbolRows } = await queryAll(
           conn,
-          'MATCH (c:CodeSymbol) RETURN c.id AS id',
+          'MATCH (c:CodeSymbol) RETURN c.id AS id, c.fqn AS fqn, c.file_path AS filePath',
         );
         const knownIds = new Set(symbolRows.map((r) => String(r['id'])));
+
+        // Build CodeSymbol-compatible objects for suggestRenames
+        const allSymbols = symbolRows.map((r) => ({
+          id: String(r['id']),
+          fqn: String(r['fqn']),
+          filePath: String(r['filePath']),
+          kind: 'function' as const,
+          lineStart: 0,
+          lineEnd: 0,
+          language: '',
+        }));
 
         // Parse all specs and find unresolved implements
         const config = loadConfig(projectDir);
         const specsDir = path.resolve(projectDir, config.specsDir);
         const files = findSpecFiles(specsDir);
-        const drift: Array<{ specId: string; symbolId: string }> = [];
+        const drift: UnresolvedImplementation[] = [];
         for (const filePath of files) {
           try {
             const parsed = parseSpecFile(filePath);
@@ -289,7 +302,18 @@ export async function runMcp(): Promise<void> {
             // skip
           }
         }
-        return jsonResult(drift);
+
+        // Enrich with rename suggestions
+        const suggestions = suggestRenames(drift, allSymbols);
+        const suggestionMap = new Map(
+          suggestions.map((s) => [`${s.specId}::${s.oldSymbolId}`, s]),
+        );
+        const enriched = drift.map((d) => ({
+          ...d,
+          suggestion: suggestionMap.get(`${d.specId}::${d.symbolId}`) ?? null,
+        }));
+
+        return jsonResult(enriched);
       } finally {
         await closeDatabase(db, conn);
       }

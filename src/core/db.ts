@@ -13,7 +13,11 @@ export async function openDatabase(
   const dir = path.join(projectDir, DB_DIR);
   fs.mkdirSync(dir, { recursive: true });
   const dbPath = path.join(dir, DB_FILE);
-  const db = new Database(dbPath, undefined, undefined, readOnly);
+  // bufferManagerSize and maxDBSize limit the mmap reservation. The native
+  // default reserves 8 TB of virtual address space, which exhausts the limit
+  // in constrained environments. 256 MB is ample for a spec graph.
+  const MAX_DB = 256 * 1024 * 1024;
+  const db = new Database(dbPath, MAX_DB, undefined, readOnly, MAX_DB);
   await db.init();
   const conn = new Connection(db);
   await conn.init();
