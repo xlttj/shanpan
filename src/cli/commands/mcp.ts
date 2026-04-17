@@ -28,6 +28,180 @@ function jsonResult(data: unknown) {
   return textResult(JSON.stringify(data, null, 2));
 }
 
+function escId(id: string): string {
+  return id.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+}
+
+const CODE_SYMBOL_KINDS = [
+  'class',
+  'function',
+  'method',
+  'interface',
+  'type',
+  'enum',
+  'constant',
+] as const;
+
+export async function handleGetCallers(
+  projectDir: string,
+  symbolId: string,
+): Promise<{ content: { type: 'text'; text: string }[] }> {
+  const { db, conn } = await openDatabase(projectDir, true);
+  try {
+    const { rows } = await queryAll(
+      conn,
+      `MATCH (c:CodeSymbol)-[:CALLS]->(:CodeSymbol {id: '${escId(symbolId)}'})
+       RETURN DISTINCT c.id AS id, c.fqn AS fqn,
+                       c.file_path AS filePath, c.symbol_type AS kind`,
+    );
+    rows.sort((a, b) => String(a['id']).localeCompare(String(b['id'])));
+    return jsonResult(rows);
+  } finally {
+    await closeDatabase(db, conn);
+  }
+}
+
+export async function handleGetCallees(
+  projectDir: string,
+  symbolId: string,
+): Promise<{ content: { type: 'text'; text: string }[] }> {
+  const { db, conn } = await openDatabase(projectDir, true);
+  try {
+    const { rows } = await queryAll(
+      conn,
+      `MATCH (:CodeSymbol {id: '${escId(symbolId)}'})-[:CALLS]->(c:CodeSymbol)
+       RETURN DISTINCT c.id AS id, c.fqn AS fqn,
+                       c.file_path AS filePath, c.symbol_type AS kind`,
+    );
+    rows.sort((a, b) => String(a['id']).localeCompare(String(b['id'])));
+    return jsonResult(rows);
+  } finally {
+    await closeDatabase(db, conn);
+  }
+}
+
+export async function handleGetImpact(
+  projectDir: string,
+  symbolId: string,
+  maxDepthRequested = 3,
+): Promise<{ content: { type: 'text'; text: string }[] }> {
+  const maxDepth = Math.max(1, Math.min(10, Math.floor(maxDepthRequested)));
+  const { db, conn } = await openDatabase(projectDir, true);
+  try {
+    const visited = new Map<
+      string,
+      { id: string; fqn: string; filePath: string; kind: string; depth: number; path: string[] }
+    >();
+    let frontier: { id: string; path: string[] }[] = [{ id: symbolId, path: [symbolId] }];
+    for (let depth = 1; depth <= maxDepth && frontier.length > 0; depth++) {
+      const nextFrontier: { id: string; path: string[] }[] = [];
+      for (const curr of frontier) {
+        const { rows } = await queryAll(
+          conn,
+          `MATCH (:CodeSymbol {id: '${escId(curr.id)}'})-[:CALLS]->(c:CodeSymbol)
+           RETURN DISTINCT c.id AS id, c.fqn AS fqn,
+                           c.file_path AS filePath, c.symbol_type AS kind`,
+        );
+        for (const row of rows) {
+          const id = String(row['id']);
+          if (id === symbolId || visited.has(id)) continue;
+          const newPath = [...curr.path, id];
+          visited.set(id, {
+            id,
+            fqn: String(row['fqn']),
+            filePath: String(row['filePath']),
+            kind: String(row['kind']),
+            depth,
+            path: newPath,
+          });
+          nextFrontier.push({ id, path: newPath });
+        }
+      }
+      frontier = nextFrontier;
+    }
+    const result = Array.from(visited.values()).sort(
+      (a, b) => a.depth - b.depth || a.id.localeCompare(b.id),
+    );
+    return jsonResult(result);
+  } finally {
+    await closeDatabase(db, conn);
+  }
+}
+
+interface SymbolSearchResult {
+  id: string;
+  fqn: string;
+  filePath: string;
+  kind: string;
+  score: number;
+}
+
+function splitIdentifierWords(fqn: string): string[] {
+  // Split on dots, then each segment on camelCase boundaries and underscores.
+  const words: string[] = [];
+  for (const segment of fqn.split('.')) {
+    if (!segment) continue;
+    const parts = segment.split(/_+/).flatMap((s) => s.split(/(?=[A-Z])/));
+    for (const p of parts) if (p) words.push(p);
+  }
+  return words;
+}
+
+export async function handleSearchSymbols(
+  projectDir: string,
+  query: string,
+  limitRequested = 20,
+  kind?: string,
+): Promise<{ content: { type: 'text'; text: string }[] }> {
+  if (!query || query.length === 0) return jsonResult([]);
+  const limit = Math.max(1, Math.min(100, Math.floor(limitRequested)));
+
+  const { db, conn } = await openDatabase(projectDir, true);
+  try {
+    // Fetch the candidate set once, filter + score in TS — avoids assumptions
+    // about LIKE/CONTAINS support and keeps the scoring logic obvious.
+    let cypher =
+      'MATCH (c:CodeSymbol) RETURN c.id AS id, c.fqn AS fqn, c.file_path AS filePath, c.symbol_type AS kind';
+    if (kind && (CODE_SYMBOL_KINDS as readonly string[]).includes(kind)) {
+      cypher = `MATCH (c:CodeSymbol { symbol_type: '${escId(kind)}' }) RETURN c.id AS id, c.fqn AS fqn, c.file_path AS filePath, c.symbol_type AS kind`;
+    }
+    const { rows } = await queryAll(conn, cypher);
+
+    const lowerQuery = query.toLowerCase();
+    const scored = new Map<string, SymbolSearchResult>();
+    for (const row of rows) {
+      const id = String(row['id']);
+      const fqn = String(row['fqn']);
+      const filePath = String(row['filePath']);
+      const rowKind = String(row['kind']);
+      let score = 0;
+      if (fqn === query) {
+        score = 100;
+      } else if (fqn.toLowerCase().includes(lowerQuery)) {
+        score = 50;
+      } else {
+        const words = splitIdentifierWords(fqn);
+        if (words.some((w) => w.toLowerCase().startsWith(lowerQuery))) {
+          score = 25;
+        }
+      }
+      if (score > 0) {
+        const prev = scored.get(id);
+        if (!prev || prev.score < score) {
+          scored.set(id, { id, fqn, filePath, kind: rowKind, score });
+        }
+      }
+    }
+
+    const result = Array.from(scored.values())
+      .sort((a, b) => b.score - a.score || a.id.localeCompare(b.id))
+      .slice(0, limit);
+    return jsonResult(result);
+  } finally {
+    await closeDatabase(db, conn);
+  }
+}
+
 export async function runMcp(): Promise<void> {
   const projectDir = process.cwd();
 
@@ -170,6 +344,67 @@ export async function runMcp(): Promise<void> {
         description:
           'Re-parse all spec files and rebuild the graph database. Use after creating or updating spec files within an MCP session.',
         inputSchema: { type: 'object', properties: {} },
+      },
+      {
+        name: 'get_callers',
+        description:
+          'List code symbols that directly call the given symbol (1-hop incoming CALLS edges).',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            symbolId: { type: 'string', description: 'Symbol ID, e.g. "src/foo.ts::bar"' },
+          },
+          required: ['symbolId'],
+        },
+      },
+      {
+        name: 'get_callees',
+        description:
+          'List code symbols that the given symbol directly calls (1-hop outgoing CALLS edges).',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            symbolId: { type: 'string', description: 'Symbol ID' },
+          },
+          required: ['symbolId'],
+        },
+      },
+      {
+        name: 'get_impact',
+        description:
+          'Blast radius: symbols transitively reachable via outgoing CALLS, up to maxDepth (default 3, max 10).',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            symbolId: { type: 'string', description: 'Symbol ID to start from' },
+            maxDepth: {
+              type: 'number',
+              description: 'Maximum BFS depth (default 3, capped at 10)',
+            },
+          },
+          required: ['symbolId'],
+        },
+      },
+      {
+        name: 'search_symbols',
+        description:
+          'Find code symbols by partial name. Matches in three passes: exact FQN (score 100), case-insensitive substring (50), camelCase/snake_case word-prefix (25).',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            query: { type: 'string', description: 'Partial name or identifier to search for' },
+            limit: {
+              type: 'number',
+              description: 'Maximum results to return (default 20, capped at 100)',
+            },
+            kind: {
+              type: 'string',
+              enum: [...CODE_SYMBOL_KINDS],
+              description: 'Optional symbol kind filter',
+            },
+          },
+          required: ['query'],
+        },
       },
     ],
   }));
@@ -411,6 +646,25 @@ export async function runMcp(): Promise<void> {
       } finally {
         await closeDatabase(db, conn);
       }
+    }
+
+    if (name === 'get_callers') {
+      return handleGetCallers(projectDir, String(a['symbolId'] ?? ''));
+    }
+
+    if (name === 'get_callees') {
+      return handleGetCallees(projectDir, String(a['symbolId'] ?? ''));
+    }
+
+    if (name === 'get_impact') {
+      const maxDepth = typeof a['maxDepth'] === 'number' ? (a['maxDepth'] as number) : 3;
+      return handleGetImpact(projectDir, String(a['symbolId'] ?? ''), maxDepth);
+    }
+
+    if (name === 'search_symbols') {
+      const limit = typeof a['limit'] === 'number' ? (a['limit'] as number) : 20;
+      const kind = typeof a['kind'] === 'string' ? (a['kind'] as string) : undefined;
+      return handleSearchSymbols(projectDir, String(a['query'] ?? ''), limit, kind);
     }
 
     return textResult(`Unknown tool: ${name}`);

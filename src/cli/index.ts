@@ -8,6 +8,7 @@ import { runAnalyze } from './commands/analyze.js';
 import { runCreate } from './commands/create.js';
 import { runUpdate } from './commands/update.js';
 import { runCheck } from './commands/check.js';
+import { runInstallHooks, runUninstallHooks } from './commands/hook.js';
 
 const program = new Command();
 
@@ -49,13 +50,25 @@ program
   .option('--include <dirs...>', 'Directories to scan (overrides config)')
   .option('--exclude <dirs...>', 'Directory names to skip (overrides config)')
   .option('--languages <langs...>', 'Languages to parse: typescript, php (overrides config)')
+  .option('--watch', 'Keep running and re-analyze on file changes (2s debounce)')
   .action((opts) =>
     runAnalyze({
       include: opts.include as string[] | undefined,
       exclude: opts.exclude as string[] | undefined,
       languages: opts.languages as string[] | undefined,
+      watch: !!opts.watch,
     }),
   );
+
+program
+  .command('install-hooks')
+  .description('Install git post-commit hook that runs specgraph analyze automatically')
+  .action(() => runInstallHooks());
+
+program
+  .command('uninstall-hooks')
+  .description('Remove the specgraph block from .git/hooks/post-commit')
+  .action(() => runUninstallHooks());
 
 program
   .command('create')

@@ -2,7 +2,7 @@
 id: SPEC-010
 title: Incremental re-analysis via file watching
 type: software_requirement
-status: draft
+status: active
 created: '2026-04-17'
 depends_on:
   - SPEC-002

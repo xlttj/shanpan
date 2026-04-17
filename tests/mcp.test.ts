@@ -138,6 +138,10 @@ describe('MCP tool list', () => {
     'update_spec',
     'get_unspecced_symbols',
     'reindex',
+    'get_callers',
+    'get_callees',
+    'get_impact',
+    'search_symbols',
   ];
 
   it('mcp.ts contains all expected tool names', async () => {
@@ -254,6 +258,229 @@ describe('reindex tool logic', () => {
     } finally {
       await closeDatabase(db, conn);
       fs.rmSync(dbDir, { recursive: true, force: true });
+    }
+  });
+});
+
+// ─── call-graph handlers (SPEC-008) ───────────────────────────────────────────
+
+describe('call-graph handlers', () => {
+  let dbDir: string;
+  let db: Database;
+  let conn: Connection;
+
+  beforeEach(async () => {
+    dbDir = fs.mkdtempSync(path.join(os.tmpdir(), 'specgraph-callgraph-'));
+    // .specgraph is a directory (see DB_DIR)
+    fs.mkdirSync(path.join(dbDir, '.specgraph'), { recursive: true });
+    ({ db, conn } = await openDatabase(dbDir));
+    await indexSpecs(conn, []);
+    // Seed: a → b → c, a → d, d → b (cycle back)
+    for (const [id, fqn] of [
+      ['src/f.ts::a', 'a'],
+      ['src/f.ts::b', 'b'],
+      ['src/f.ts::c', 'c'],
+      ['src/f.ts::d', 'd'],
+    ]) {
+      const r = await conn.query(
+        `CREATE (:CodeSymbol { id: '${id}', fqn: '${fqn}', symbol_type: 'function', file_path: 'src/f.ts', line_start: 0, line_end: 0, language: 'typescript' })`,
+      );
+      if (!Array.isArray(r)) r.close();
+    }
+    for (const [from, to] of [
+      ['src/f.ts::a', 'src/f.ts::b'],
+      ['src/f.ts::b', 'src/f.ts::c'],
+      ['src/f.ts::a', 'src/f.ts::d'],
+      ['src/f.ts::d', 'src/f.ts::b'],
+    ]) {
+      const r = await conn.query(
+        `MATCH (s:CodeSymbol {id: '${from}'}), (t:CodeSymbol {id: '${to}'}) CREATE (s)-[:CALLS {call_kind: 'static_call'}]->(t)`,
+      );
+      if (!Array.isArray(r)) r.close();
+    }
+    // Close the write connection so read-only handlers can open their own.
+    await closeDatabase(db, conn);
+  });
+
+  afterEach(() => {
+    fs.rmSync(dbDir, { recursive: true, force: true });
+  });
+
+  function parseJsonResult(res: { content: { type: string; text: string }[] }): unknown {
+    return JSON.parse(res.content[0]!.text);
+  }
+
+  it('get_callers returns direct callers only', async () => {
+    const { handleGetCallers } = await import('../src/cli/commands/mcp.js');
+    const res = parseJsonResult(await handleGetCallers(dbDir, 'src/f.ts::b')) as {
+      id: string;
+    }[];
+    const ids = res.map((r) => r.id).sort();
+    expect(ids).toEqual(['src/f.ts::a', 'src/f.ts::d']);
+  });
+
+  it('get_callers returns empty array for unknown symbol', async () => {
+    const { handleGetCallers } = await import('../src/cli/commands/mcp.js');
+    const res = parseJsonResult(await handleGetCallers(dbDir, 'src/does-not-exist.ts::nope'));
+    expect(res).toEqual([]);
+  });
+
+  it('get_callees returns direct callees only', async () => {
+    const { handleGetCallees } = await import('../src/cli/commands/mcp.js');
+    const res = parseJsonResult(await handleGetCallees(dbDir, 'src/f.ts::a')) as {
+      id: string;
+    }[];
+    const ids = res.map((r) => r.id).sort();
+    expect(ids).toEqual(['src/f.ts::b', 'src/f.ts::d']);
+  });
+
+  it('get_callees returns empty array for leaf symbol', async () => {
+    const { handleGetCallees } = await import('../src/cli/commands/mcp.js');
+    const res = parseJsonResult(await handleGetCallees(dbDir, 'src/f.ts::c'));
+    expect(res).toEqual([]);
+  });
+
+  it('get_impact reaches all descendants with depth info', async () => {
+    const { handleGetImpact } = await import('../src/cli/commands/mcp.js');
+    const res = parseJsonResult(await handleGetImpact(dbDir, 'src/f.ts::a', 3)) as {
+      id: string;
+      depth: number;
+    }[];
+    const ids = res.map((r) => r.id).sort();
+    expect(ids).toEqual(['src/f.ts::b', 'src/f.ts::c', 'src/f.ts::d']);
+    const byId = new Map(res.map((r) => [r.id, r.depth]));
+    expect(byId.get('src/f.ts::b')).toBe(1);
+    expect(byId.get('src/f.ts::d')).toBe(1);
+    expect(byId.get('src/f.ts::c')).toBe(2);
+  });
+
+  it('get_impact excludes the seed symbol itself and terminates on cycles', async () => {
+    const { handleGetImpact } = await import('../src/cli/commands/mcp.js');
+    const res = parseJsonResult(await handleGetImpact(dbDir, 'src/f.ts::b', 5)) as {
+      id: string;
+    }[];
+    // b → c is the only reachable path; d→b→c must not pull b back in
+    const ids = res.map((r) => r.id).sort();
+    expect(ids).toEqual(['src/f.ts::c']);
+  });
+
+  it('get_impact respects maxDepth', async () => {
+    const { handleGetImpact } = await import('../src/cli/commands/mcp.js');
+    const res = parseJsonResult(await handleGetImpact(dbDir, 'src/f.ts::a', 1)) as {
+      id: string;
+    }[];
+    const ids = res.map((r) => r.id).sort();
+    expect(ids).toEqual(['src/f.ts::b', 'src/f.ts::d']);
+  });
+});
+
+// ─── search_symbols (SPEC-009) ────────────────────────────────────────────────
+
+describe('search_symbols handler', () => {
+  let dbDir: string;
+  let db: Database;
+  let conn: Connection;
+
+  beforeEach(async () => {
+    dbDir = fs.mkdtempSync(path.join(os.tmpdir(), 'specgraph-search-'));
+    fs.mkdirSync(path.join(dbDir, '.specgraph'), { recursive: true });
+    ({ db, conn } = await openDatabase(dbDir));
+    await indexSpecs(conn, []);
+    const rows: [string, string, string][] = [
+      ['src/auth.ts::signInWithGoogle', 'signInWithGoogle', 'function'],
+      ['src/auth.ts::signInWithApple', 'signInWithApple', 'function'],
+      ['src/tax.ts::Tax.calculateTax', 'Tax.calculateTax', 'method'],
+      ['src/tax.ts::Tax', 'Tax', 'class'],
+      ['src/misc.ts::my_helper', 'my_helper', 'function'],
+    ];
+    for (const [id, fqn, kind] of rows) {
+      const r = await conn.query(
+        `CREATE (:CodeSymbol { id: '${id}', fqn: '${fqn}', symbol_type: '${kind}', file_path: '${
+          id.split('::')[0]
+        }', line_start: 0, line_end: 0, language: 'typescript' })`,
+      );
+      if (!Array.isArray(r)) r.close();
+    }
+    await closeDatabase(db, conn);
+  });
+
+  afterEach(() => {
+    fs.rmSync(dbDir, { recursive: true, force: true });
+  });
+
+  function parseJsonResult(res: { content: { type: string; text: string }[] }): unknown {
+    return JSON.parse(res.content[0]!.text);
+  }
+
+  it('exact FQN match scores 100', async () => {
+    const { handleSearchSymbols } = await import('../src/cli/commands/mcp.js');
+    const res = parseJsonResult(await handleSearchSymbols(dbDir, 'signInWithGoogle')) as {
+      id: string;
+      score: number;
+    }[];
+    expect(res[0]?.score).toBe(100);
+    expect(res[0]?.id).toBe('src/auth.ts::signInWithGoogle');
+  });
+
+  it('case-insensitive substring match scores 50', async () => {
+    const { handleSearchSymbols } = await import('../src/cli/commands/mcp.js');
+    const res = parseJsonResult(await handleSearchSymbols(dbDir, 'tax')) as {
+      id: string;
+      score: number;
+    }[];
+    const scores = new Map(res.map((r) => [r.id, r.score]));
+    // Both Tax and Tax.calculateTax contain "tax" case-insensitively
+    expect(scores.get('src/tax.ts::Tax')).toBe(50);
+    expect(scores.get('src/tax.ts::Tax.calculateTax')).toBe(50);
+  });
+
+  it('camelCase boundary match scores 25', async () => {
+    const { handleSearchSymbols } = await import('../src/cli/commands/mcp.js');
+    const res = parseJsonResult(await handleSearchSymbols(dbDir, 'google')) as {
+      id: string;
+      score: number;
+    }[];
+    const hit = res.find((r) => r.id === 'src/auth.ts::signInWithGoogle');
+    // "Google" word-prefix matches "google" (lowercased); substring also hits, so substring wins
+    expect(hit?.score).toBe(50);
+  });
+
+  it('snake_case boundary match scores 25 when no substring match exists', async () => {
+    const { handleSearchSymbols } = await import('../src/cli/commands/mcp.js');
+    const res = parseJsonResult(await handleSearchSymbols(dbDir, 'help')) as {
+      id: string;
+      score: number;
+    }[];
+    const hit = res.find((r) => r.id === 'src/misc.ts::my_helper');
+    // "helper" word starts with "help" but "help" is also a substring of "my_helper" → 50
+    expect(hit?.score).toBe(50);
+  });
+
+  it('kind filter narrows results', async () => {
+    const { handleSearchSymbols } = await import('../src/cli/commands/mcp.js');
+    const res = parseJsonResult(await handleSearchSymbols(dbDir, 'Tax', 20, 'class')) as {
+      id: string;
+      kind: string;
+    }[];
+    expect(res).toHaveLength(1);
+    expect(res[0]?.id).toBe('src/tax.ts::Tax');
+    expect(res[0]?.kind).toBe('class');
+  });
+
+  it('empty query returns empty array', async () => {
+    const { handleSearchSymbols } = await import('../src/cli/commands/mcp.js');
+    const res = parseJsonResult(await handleSearchSymbols(dbDir, ''));
+    expect(res).toEqual([]);
+  });
+
+  it('results are sorted by score descending', async () => {
+    const { handleSearchSymbols } = await import('../src/cli/commands/mcp.js');
+    const res = parseJsonResult(await handleSearchSymbols(dbDir, 'Tax')) as {
+      id: string;
+      score: number;
+    }[];
+    for (let i = 1; i < res.length; i++) {
+      expect(res[i - 1]!.score).toBeGreaterThanOrEqual(res[i]!.score);
     }
   });
 });
