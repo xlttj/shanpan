@@ -18,6 +18,14 @@ afterEach(() => {
   fs.rmSync(tmpDir, { recursive: true, force: true });
 });
 
+/** Poll until `predicate()` is true or the deadline passes. */
+async function waitUntil(predicate: () => boolean, timeoutMs = 5000): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (!predicate() && Date.now() < deadline) {
+    await new Promise((r) => setTimeout(r, 100));
+  }
+}
+
 describe('watchAndReindex', () => {
   it('calls onFlush after debounce window when a file changes', async () => {
     let flushCount = 0;
@@ -40,8 +48,8 @@ describe('watchAndReindex', () => {
       // Trigger a write; watcher has a 2-second debounce
       fs.writeFileSync(path.join(tmpDir, 'src', 'foo.ts'), 'export const x = 1;\n');
 
-      // Wait slightly longer than the debounce window
-      await new Promise((r) => setTimeout(r, 2500));
+      // Poll until the flush fires (debounce ~2 s) or 5 s timeout
+      await waitUntil(() => flushCount > 0);
 
       expect(flushCount).toBe(1);
       expect(lastPaths.length).toBeGreaterThan(0);
@@ -68,9 +76,10 @@ describe('watchAndReindex', () => {
     });
 
     try {
-      // Writing inside .specgraph must not trigger a flush
+      // Writing inside .specgraph must not trigger a flush — wait the full
+      // debounce window plus a generous buffer to confirm nothing fires.
       fs.writeFileSync(path.join(tmpDir, '.specgraph', 'graph.db'), 'binary junk');
-      await new Promise((r) => setTimeout(r, 2500));
+      await waitUntil(() => flushCount > 0, 2800);
       expect(flushCount).toBe(0);
     } finally {
       await stop();

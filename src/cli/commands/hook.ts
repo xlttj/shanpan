@@ -36,13 +36,8 @@ export function uninstallPostCommitHook(projectDir: string): 'removed' | 'absent
   if (!fs.existsSync(file)) return 'not_found';
   const existing = fs.readFileSync(file, 'utf-8');
   if (!existing.includes(MARKER)) return 'absent';
-  const lines = existing.split('\n');
-  const markerIdx = lines.findIndex((l) => l.includes(MARKER));
-  // Remove marker + the two following lines of our block: the command and a trailing blank.
-  // Our block is exactly "MARKER\n(specgraph analyze …)\n" — two non-empty lines.
-  const beforeBlock = lines.slice(0, markerIdx);
-  const afterBlock = lines.slice(markerIdx + 2);
-  const rebuilt = [...beforeBlock, ...afterBlock].join('\n').replace(/\n{3,}/g, '\n\n');
+  // Remove the exact block we installed, then collapse any resulting triple blank lines.
+  const rebuilt = existing.replace(HOOK_BLOCK, '').replace(/\n{3,}/g, '\n\n');
   fs.writeFileSync(file, rebuilt);
   return 'removed';
 }

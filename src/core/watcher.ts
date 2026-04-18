@@ -59,7 +59,8 @@ export function watchAndReindex(
   };
 
   const flush = async () => {
-    if (stopped || flushing) {
+    if (stopped) return;
+    if (flushing) {
       if (pendingPaths.size > 0) scheduleFlush();
       return;
     }
@@ -124,5 +125,6 @@ export function watchAndReindex(
       timer = null;
     }
     for (const w of watchers) w.close();
+    watchers.length = 0;
   };
 }

@@ -6,6 +6,11 @@ import { SCHEMA_STATEMENTS, DROP_ORDER } from './schema.js';
 export const DB_DIR = '.specgraph';
 export const DB_FILE = 'graph.db';
 
+/** Escape a string for safe interpolation into a Cypher single-quoted literal. */
+export function escId(id: string): string {
+  return id.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+}
+
 export async function openDatabase(
   projectDir: string,
   readOnly = false,
@@ -15,8 +20,9 @@ export async function openDatabase(
   const dbPath = path.join(dir, DB_FILE);
   // bufferManagerSize and maxDBSize limit the mmap reservation. The native
   // default reserves 8 TB of virtual address space, which exhausts the limit
-  // in constrained environments. 256 MB is ample for a spec graph.
-  const MAX_DB = 256 * 1024 * 1024;
+  // in constrained environments. Override with SPECGRAPH_MAX_DB_MB env var.
+  const maxMb = parseInt(process.env['SPECGRAPH_MAX_DB_MB'] ?? '256', 10);
+  const MAX_DB = (isNaN(maxMb) || maxMb < 16 ? 256 : maxMb) * 1024 * 1024;
   const db = new Database(dbPath, MAX_DB, undefined, readOnly, MAX_DB);
   await db.init();
   const conn = new Connection(db);

@@ -6,7 +6,7 @@ import {
   CallToolRequestSchema,
   ListToolsRequestSchema,
 } from '@modelcontextprotocol/sdk/types.js';
-import { openDatabase, closeDatabase, dbExists, queryAll } from '../../core/db.js';
+import { openDatabase, closeDatabase, dbExists, queryAll, escId } from '../../core/db.js';
 import { loadConfig } from '../../core/config.js';
 import { parseSpecFile, findSpecFiles, parseAllSpecs } from '../../core/parser.js';
 import { createSpec, updateSpec, ALLOWED_SPEC_TYPES } from '../../core/spec-writer.js';
@@ -26,10 +26,6 @@ function textResult(text: string) {
 
 function jsonResult(data: unknown) {
   return textResult(JSON.stringify(data, null, 2));
-}
-
-function escId(id: string): string {
-  return id.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
 }
 
 const CODE_SYMBOL_KINDS = [
@@ -161,9 +157,9 @@ export async function handleSearchSymbols(
     // Fetch the candidate set once, filter + score in TS — avoids assumptions
     // about LIKE/CONTAINS support and keeps the scoring logic obvious.
     let cypher =
-      'MATCH (c:CodeSymbol) RETURN c.id AS id, c.fqn AS fqn, c.file_path AS filePath, c.symbol_type AS kind';
+      'MATCH (c:CodeSymbol) RETURN c.id AS id, c.fqn AS fqn, c.file_path AS filePath, c.symbol_type AS kind LIMIT 10000';
     if (kind && (CODE_SYMBOL_KINDS as readonly string[]).includes(kind)) {
-      cypher = `MATCH (c:CodeSymbol { symbol_type: '${escId(kind)}' }) RETURN c.id AS id, c.fqn AS fqn, c.file_path AS filePath, c.symbol_type AS kind`;
+      cypher = `MATCH (c:CodeSymbol { symbol_type: '${escId(kind)}' }) RETURN c.id AS id, c.fqn AS fqn, c.file_path AS filePath, c.symbol_type AS kind LIMIT 10000`;
     }
     const { rows } = await queryAll(conn, cypher);
 
@@ -467,7 +463,7 @@ export async function runMcp(): Promise<void> {
 
     if (name === 'get_symbols_for_spec') {
       const id = String(a['id'] ?? '');
-      const esc = id.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+      const esc = escId(id);
       const { db, conn } = await openDatabase(projectDir, true);
       try {
         const { rows } = await queryAll(
@@ -484,7 +480,7 @@ export async function runMcp(): Promise<void> {
 
     if (name === 'get_specs_for_symbol') {
       const symbolId = String(a['symbolId'] ?? '');
-      const esc = symbolId.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+      const esc = escId(symbolId);
       const { db, conn } = await openDatabase(projectDir, true);
       try {
         const { rows } = await queryAll(
@@ -619,7 +615,7 @@ export async function runMcp(): Promise<void> {
         let cypher =
           'MATCH (c:CodeSymbol) WHERE NOT EXISTS { MATCH (c)-[:IMPLEMENTS]->() }';
         if (filePath !== undefined) {
-          const safe = filePath.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+          const safe = escId(filePath);
           cypher += ` AND c.file_path = '${safe}'`;
         }
         cypher +=

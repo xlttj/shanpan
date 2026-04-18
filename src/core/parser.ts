@@ -13,6 +13,12 @@ export function parseSpecFile(filePath: string): ParsedSpec {
   if (!frontmatter.type) throw new Error(`Missing required field 'type' in ${filePath}`);
   if (!frontmatter.status) throw new Error(`Missing required field 'status' in ${filePath}`);
 
+  for (const impl of frontmatter.implements ?? []) {
+    if (!impl.symbol || typeof impl.symbol !== 'string') {
+      throw new Error(`Invalid implements entry in ${filePath}: missing 'symbol' string field`);
+    }
+  }
+
   return { frontmatter, content: content.trim(), filePath };
 }
 

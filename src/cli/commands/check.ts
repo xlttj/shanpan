@@ -1,6 +1,6 @@
 import chalk from 'chalk';
 import { execFileSync } from 'node:child_process';
-import { openDatabase, closeDatabase, dbExists, queryAll } from '../../core/db.js';
+import { openDatabase, closeDatabase, dbExists, queryAll, escId } from '../../core/db.js';
 
 interface StagedChanges {
   removed: string[]; // deleted or renamed — symbol IDs definitively broken
@@ -44,7 +44,7 @@ function getStagedChanges(): StagedChanges {
 }
 
 function escList(paths: string[]): string {
-  return paths.map((p) => `'${p.replace(/\\/g, '\\\\').replace(/'/g, "\\'")}'`).join(', ');
+  return paths.map((p) => `'${escId(p)}'`).join(', ');
 }
 
 export async function runCheck(options: { staged: boolean }): Promise<void> {
