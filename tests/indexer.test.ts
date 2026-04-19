@@ -136,3 +136,4 @@ describe('getGraphStats', () => {
     expect(stats.edges['IMPLEMENTS']).toBe(1);
   });
 });
+

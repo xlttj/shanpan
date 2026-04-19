@@ -70,14 +70,22 @@ export async function runCheck(options: { staged: boolean }): Promise<void> {
   let hasViolations = false;
 
   try {
-    // Hard block: files deleted or renamed — symbol IDs in specs are now broken
+    // Hard block: files deleted or renamed — spec references are now broken.
+    // Check both CodeSymbol nodes (by file_path) and File nodes (by id).
     if (removed.length > 0) {
-      const { rows } = await queryAll(
+      const { rows: symRows } = await queryAll(
         conn,
         `MATCH (c:CodeSymbol)-[:IMPLEMENTS]->(s:Spec)
          WHERE c.file_path IN [${escList(removed)}]
          RETURN c.id AS symbolId, s.id AS specId`,
       );
+      const { rows: fileRows } = await queryAll(
+        conn,
+        `MATCH (f:File)-[:IMPLEMENTS]->(s:Spec)
+         WHERE f.id IN [${escList(removed)}]
+         RETURN f.id AS symbolId, s.id AS specId`,
+      );
+      const rows = [...symRows, ...fileRows];
 
       if (rows.length > 0) {
         hasViolations = true;
@@ -93,14 +101,24 @@ export async function runCheck(options: { staged: boolean }): Promise<void> {
       }
     }
 
-    // Soft warn: files modified — symbol may still exist, but behaviour may have changed
+    // Soft warn: files modified.
+    // For CodeSymbols: the symbol may still exist but behaviour may have changed.
+    // For File nodes: any change is semantically significant — content must be
+    // re-verified against the spec.
     if (modified.length > 0) {
-      const { rows } = await queryAll(
+      const { rows: symRows } = await queryAll(
         conn,
         `MATCH (c:CodeSymbol)-[:IMPLEMENTS]->(s:Spec)
          WHERE c.file_path IN [${escList(modified)}]
          RETURN c.id AS symbolId, s.id AS specId`,
       );
+      const { rows: fileRows } = await queryAll(
+        conn,
+        `MATCH (f:File)-[:IMPLEMENTS]->(s:Spec)
+         WHERE f.id IN [${escList(modified)}]
+         RETURN f.id AS symbolId, s.id AS specId`,
+      );
+      const rows = [...symRows, ...fileRows];
 
       if (rows.length > 0) {
         console.error(chalk.yellow('⚠ Spec review suggested: the following specs reference symbols in modified files:'));

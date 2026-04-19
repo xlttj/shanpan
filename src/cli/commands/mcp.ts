@@ -198,6 +198,60 @@ export async function handleSearchSymbols(
   }
 }
 
+export async function handleGetSpecsForSymbolWithContext(
+  projectDir: string,
+  symbolId: string,
+): Promise<{ content: { type: 'text'; text: string }[] }> {
+  const { db, conn } = await openDatabase(projectDir, true);
+  try {
+    const sep = symbolId.indexOf('::');
+    const filePath = sep === -1 ? symbolId : symbolId.slice(0, sep);
+    const fqn = sep === -1 ? null : symbolId.slice(sep + 2);
+
+    // Build the FQN ancestor chain: e.g. "UserService.signIn" → ["UserService.signIn", "UserService"]
+    const fqnLevels: string[] = [];
+    if (fqn) {
+      let current = fqn;
+      while (current) {
+        fqnLevels.push(current);
+        const dot = current.lastIndexOf('.');
+        if (dot === -1) break;
+        current = current.slice(0, dot);
+      }
+    }
+
+    const result: { scope: string; symbolId: string; specs: unknown[] }[] = [];
+
+    // Query each FQN level (symbol → parent class → … )
+    for (let i = 0; i < fqnLevels.length; i++) {
+      const id = `${filePath}::${fqnLevels[i]}`;
+      const { rows } = await queryAll(
+        conn,
+        `MATCH (c:CodeSymbol {id: '${escId(id)}'})-[:IMPLEMENTS]->(s:Spec)
+         RETURN s.id AS id, s.title AS title, s.type AS type, s.status AS status`,
+      );
+      if (rows.length > 0) {
+        const scope = i === 0 ? 'symbol' : i === fqnLevels.length - 1 ? 'class' : 'parent';
+        result.push({ scope, symbolId: id, specs: rows });
+      }
+    }
+
+    // Query File node specs
+    const { rows: fileRows } = await queryAll(
+      conn,
+      `MATCH (f:File {id: '${escId(filePath)}'})-[:IMPLEMENTS]->(s:Spec)
+       RETURN s.id AS id, s.title AS title, s.type AS type, s.status AS status`,
+    );
+    if (fileRows.length > 0) {
+      result.push({ scope: 'file', symbolId: filePath, specs: fileRows });
+    }
+
+    return jsonResult(result);
+  } finally {
+    await closeDatabase(db, conn);
+  }
+}
+
 export async function runMcp(): Promise<void> {
   const projectDir = process.cwd();
 
@@ -402,6 +456,21 @@ export async function runMcp(): Promise<void> {
           required: ['query'],
         },
       },
+      {
+        name: 'get_specs_for_symbol_with_context',
+        description:
+          'Get specs for a symbol AND its containing class/file hierarchy. Returns results grouped by scope (symbol, parent, class, file), with empty scopes omitted.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            symbolId: {
+              type: 'string',
+              description: 'Symbol ID (e.g. "src/auth/session.ts::UserService.signIn") or bare file path (e.g. "composer.json")',
+            },
+          },
+          required: ['symbolId'],
+        },
+      },
     ],
   }));
 
@@ -483,12 +552,17 @@ export async function runMcp(): Promise<void> {
       const esc = escId(symbolId);
       const { db, conn } = await openDatabase(projectDir, true);
       try {
-        const { rows } = await queryAll(
+        const { rows: symRows } = await queryAll(
           conn,
           `MATCH (c:CodeSymbol {id: '${esc}'})-[:IMPLEMENTS]->(s:Spec)
            RETURN s.id AS id, s.title AS title, s.type AS type, s.status AS status`,
         );
-        return jsonResult(rows);
+        const { rows: fileRows } = await queryAll(
+          conn,
+          `MATCH (f:File {id: '${esc}'})-[:IMPLEMENTS]->(s:Spec)
+           RETURN s.id AS id, s.title AS title, s.type AS type, s.status AS status`,
+        );
+        return jsonResult([...symRows, ...fileRows]);
       } finally {
         await closeDatabase(db, conn);
       }
@@ -661,6 +735,10 @@ export async function runMcp(): Promise<void> {
       const limit = typeof a['limit'] === 'number' ? (a['limit'] as number) : 20;
       const kind = typeof a['kind'] === 'string' ? (a['kind'] as string) : undefined;
       return handleSearchSymbols(projectDir, String(a['query'] ?? ''), limit, kind);
+    }
+
+    if (name === 'get_specs_for_symbol_with_context') {
+      return handleGetSpecsForSymbolWithContext(projectDir, String(a['symbolId'] ?? ''));
     }
 
     return textResult(`Unknown tool: ${name}`);

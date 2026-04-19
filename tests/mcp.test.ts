@@ -142,6 +142,7 @@ describe('MCP tool list', () => {
     'get_callees',
     'get_impact',
     'search_symbols',
+    'get_specs_for_symbol_with_context',
   ];
 
   it('mcp.ts contains all expected tool names', async () => {
@@ -482,5 +483,104 @@ describe('search_symbols handler', () => {
     for (let i = 1; i < res.length; i++) {
       expect(res[i - 1]!.score).toBeGreaterThanOrEqual(res[i]!.score);
     }
+  });
+});
+
+// ─── handleGetSpecsForSymbolWithContext (SPEC-011) ────────────────────────────
+
+describe('handleGetSpecsForSymbolWithContext', () => {
+  let dbDir: string;
+  let db: Database;
+  let conn: Connection;
+
+  beforeEach(async () => {
+    dbDir = fs.mkdtempSync(path.join(os.tmpdir(), 'specgraph-ctx-'));
+    fs.mkdirSync(path.join(dbDir, '.specgraph'), { recursive: true });
+    ({ db, conn } = await openDatabase(dbDir));
+    await indexSpecs(conn, [
+      { frontmatter: { id: 'SPEC-M', title: 'Method Spec', type: 'software_requirement', status: 'active' }, content: '', filePath: '' },
+      { frontmatter: { id: 'SPEC-C', title: 'Class Spec', type: 'software_requirement', status: 'active' }, content: '', filePath: '' },
+      { frontmatter: { id: 'SPEC-F', title: 'File Spec', type: 'software_requirement', status: 'active' }, content: '', filePath: '' },
+    ]);
+    // Seed CodeSymbol nodes
+    for (const [id, fqn] of [
+      ['src/auth.ts::UserService', 'UserService'],
+      ['src/auth.ts::UserService.signIn', 'UserService.signIn'],
+    ]) {
+      const r = await conn.query(
+        `CREATE (:CodeSymbol { id: '${id}', fqn: '${fqn}', symbol_type: 'class', file_path: 'src/auth.ts', line_start: 0, line_end: 0, language: 'typescript' })`,
+      );
+      if (!Array.isArray(r)) r.close();
+    }
+    // Seed File node
+    const rf = await conn.query(
+      `CREATE (:File { id: 'src/auth.ts', path: 'src/auth.ts', ext: '.ts', kind: 'source' })`,
+    );
+    if (!Array.isArray(rf)) rf.close();
+    // Seed IMPLEMENTS edges
+    for (const [fromId, toId] of [
+      ['src/auth.ts::UserService.signIn', 'SPEC-M'],
+      ['src/auth.ts::UserService', 'SPEC-C'],
+    ]) {
+      const r = await conn.query(
+        `MATCH (c:CodeSymbol {id: '${fromId}'}), (s:Spec {id: '${toId}'}) CREATE (c)-[:IMPLEMENTS {confidence: 1.0}]->(s)`,
+      );
+      if (!Array.isArray(r)) r.close();
+    }
+    const rf2 = await conn.query(
+      `MATCH (f:File {id: 'src/auth.ts'}), (s:Spec {id: 'SPEC-F'}) CREATE (f)-[:IMPLEMENTS {confidence: 1.0}]->(s)`,
+    );
+    if (!Array.isArray(rf2)) rf2.close();
+    await closeDatabase(db, conn);
+  });
+
+  afterEach(() => {
+    fs.rmSync(dbDir, { recursive: true, force: true });
+  });
+
+  function parseJsonResult(res: { content: { type: string; text: string }[] }): unknown {
+    return JSON.parse(res.content[0]!.text);
+  }
+
+  it('method symbolId returns symbol-scope and class-scope specs', async () => {
+    const { handleGetSpecsForSymbolWithContext } = await import('../src/cli/commands/mcp.js');
+    const res = parseJsonResult(
+      await handleGetSpecsForSymbolWithContext(dbDir, 'src/auth.ts::UserService.signIn'),
+    ) as { scope: string; symbolId: string; specs: { id: string }[] }[];
+    const scopes = res.map((r) => r.scope);
+    expect(scopes).toContain('symbol');
+    expect(scopes).toContain('class');
+    const symbolEntry = res.find((r) => r.scope === 'symbol')!;
+    expect(symbolEntry.specs.map((s) => s.id)).toContain('SPEC-M');
+    const classEntry = res.find((r) => r.scope === 'class')!;
+    expect(classEntry.specs.map((s) => s.id)).toContain('SPEC-C');
+  });
+
+  it('method symbolId includes file-scope specs', async () => {
+    const { handleGetSpecsForSymbolWithContext } = await import('../src/cli/commands/mcp.js');
+    const res = parseJsonResult(
+      await handleGetSpecsForSymbolWithContext(dbDir, 'src/auth.ts::UserService.signIn'),
+    ) as { scope: string; specs: { id: string }[] }[];
+    const fileEntry = res.find((r) => r.scope === 'file');
+    expect(fileEntry).toBeDefined();
+    expect(fileEntry!.specs.map((s) => s.id)).toContain('SPEC-F');
+  });
+
+  it('bare file path returns only file-scope specs', async () => {
+    const { handleGetSpecsForSymbolWithContext } = await import('../src/cli/commands/mcp.js');
+    const res = parseJsonResult(
+      await handleGetSpecsForSymbolWithContext(dbDir, 'src/auth.ts'),
+    ) as { scope: string; specs: { id: string }[] }[];
+    expect(res).toHaveLength(1);
+    expect(res[0]!.scope).toBe('file');
+    expect(res[0]!.specs.map((s) => s.id)).toContain('SPEC-F');
+  });
+
+  it('unknown symbolId returns empty array', async () => {
+    const { handleGetSpecsForSymbolWithContext } = await import('../src/cli/commands/mcp.js');
+    const res = parseJsonResult(
+      await handleGetSpecsForSymbolWithContext(dbDir, 'src/does-not-exist.ts::nope'),
+    );
+    expect(res).toEqual([]);
   });
 });

@@ -25,6 +25,12 @@ export const SCHEMA_STATEMENTS = [
     line_end INT64,
     language STRING
   )`,
+  `CREATE NODE TABLE File (
+    id   STRING PRIMARY KEY,
+    path STRING,
+    ext  STRING,
+    kind STRING
+  )`,
   `CREATE REL TABLE DEPENDS_ON (FROM Spec TO Spec)`,
   `CREATE REL TABLE DERIVES_FROM (FROM Spec TO Spec)`,
   `CREATE REL TABLE DEFINES (FROM Spec TO BusinessRule)`,
@@ -35,9 +41,15 @@ export const SCHEMA_STATEMENTS = [
   `CREATE REL TABLE GROUP IMPLEMENTS (
     FROM CodeSymbol TO Spec,
     FROM CodeSymbol TO BusinessRule,
+    FROM File TO Spec,
+    FROM File TO BusinessRule,
     confidence FLOAT DEFAULT 1.0,
     verified_at TIMESTAMP,
     verified_by STRING
+  )`,
+  `CREATE REL TABLE GROUP CONTAINS (
+    FROM File TO CodeSymbol,
+    FROM CodeSymbol TO CodeSymbol
   )`,
   `CREATE REL TABLE CALLS (
     FROM CodeSymbol TO CodeSymbol,
@@ -45,10 +57,11 @@ export const SCHEMA_STATEMENTS = [
   )`,
 ];
 
-/** Tables to drop in dependency order (edges before nodes) */
+/** Tables to drop in dependency order (edges before nodes). */
 export const DROP_ORDER = [
   'CALLS',
   'IMPLEMENTS',
+  'CONTAINS',
   'CONSTRAINS',
   'DEFINES',
   'DERIVES_FROM',
@@ -56,4 +69,5 @@ export const DROP_ORDER = [
   'CodeSymbol',
   'BusinessRule',
   'Spec',
+  'File',
 ];
