@@ -1,39 +1,110 @@
+import { createRequire } from 'module';
+import type Parser from 'tree-sitter';
 import type { CodeSymbol, SymbolKind, CallRef } from '../../types/code.js';
 import type { LanguageParser } from './parser.js';
 
-const TS_KEYWORDS = new Set([
-  'break', 'case', 'catch', 'class', 'const', 'continue', 'debugger', 'default',
-  'delete', 'do', 'else', 'export', 'extends', 'finally', 'for', 'function',
-  'if', 'import', 'in', 'instanceof', 'let', 'new', 'return', 'super', 'switch',
-  'this', 'throw', 'try', 'typeof', 'var', 'void', 'while', 'with', 'yield',
-  'enum', 'implements', 'interface', 'package', 'private', 'protected', 'public',
-  'static', 'abstract', 'as', 'async', 'await', 'declare', 'from', 'module',
-  'namespace', 'of', 'override', 'readonly', 'type',
-]);
+const require = createRequire(import.meta.url);
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const TreeSitter = require('tree-sitter') as typeof Parser;
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const TSLanguage = require('tree-sitter-typescript') as {
+  typescript: Parser.Language;
+  tsx: Parser.Language;
+};
 
-const TS_MODIFIERS_RE =
-  /^(?:(?:public|private|protected|static|async|abstract|override|readonly)\s+)*/;
+const TS_DECLARATION_TYPES: Record<string, SymbolKind> = {
+  class_declaration: 'class',
+  abstract_class_declaration: 'class',
+  function_declaration: 'function',
+  interface_declaration: 'interface',
+  type_alias_declaration: 'type',
+  enum_declaration: 'enum',
+};
 
-interface Scope {
-  sym: CodeSymbol;
-  closeDepth: number;
-  isClassLike: boolean;
+const METHOD_TYPES = new Set(['method_definition', 'method_signature']);
+
+function getNameNode(node: Parser.SyntaxNode): Parser.SyntaxNode | null {
+  return (
+    node.childForFieldName('name') ??
+    node.children.find(
+      (c) => c.type === 'type_identifier' || c.type === 'identifier' || c.type === 'property_identifier',
+    ) ??
+    null
+  );
 }
 
-interface Pending {
-  name: string;
-  kind: SymbolKind;
-  lineStart: number;
-  isClassLike: boolean;
+function walkNode(
+  node: Parser.SyntaxNode,
+  filePath: string,
+  language: string,
+  parentFqn: string | null,
+  results: CodeSymbol[],
+): void {
+  const kind = TS_DECLARATION_TYPES[node.type];
+
+  if (kind !== undefined) {
+    const nameNode = getNameNode(node);
+    if (nameNode) {
+      const name = nameNode.text;
+      const fqn = parentFqn ? `${parentFqn}.${name}` : name;
+      results.push({
+        id: `${filePath}::${fqn}`,
+        fqn,
+        kind,
+        filePath,
+        lineStart: node.startPosition.row + 1,
+        lineEnd: node.endPosition.row + 1,
+        language,
+      });
+      // Walk into class/interface body for methods
+      if (kind === 'class' || kind === 'interface') {
+        const body =
+          node.childForFieldName('body') ??
+          node.children.find((c) => c.type === 'class_body' || c.type === 'interface_body');
+        if (body) {
+          for (const child of body.children) {
+            walkNode(child, filePath, language, fqn, results);
+          }
+        }
+      }
+    }
+    return;
+  }
+
+  if (METHOD_TYPES.has(node.type)) {
+    const nameNode = getNameNode(node);
+    if (nameNode && parentFqn) {
+      const fqn = `${parentFqn}.${nameNode.text}`;
+      results.push({
+        id: `${filePath}::${fqn}`,
+        fqn,
+        kind: 'method',
+        filePath,
+        lineStart: node.startPosition.row + 1,
+        lineEnd: node.endPosition.row + 1,
+        language,
+      });
+    }
+    return;
+  }
+
+  // Unwrap export statements
+  if (node.type === 'export_statement') {
+    for (const child of node.children) {
+      walkNode(child, filePath, language, parentFqn, results);
+    }
+    return;
+  }
+
+  // Recurse into top-level containers
+  if (node.type === 'program' || node.type === 'statement_block') {
+    for (const child of node.children) {
+      walkNode(child, filePath, language, parentFqn, results);
+    }
+  }
 }
 
-function countChar(s: string, ch: string): number {
-  let n = 0;
-  for (const c of s) if (c === ch) n++;
-  return n;
-}
-
-function findEnclosing(symbols: CodeSymbol[], line: number): CodeSymbol | null {
+function findEnclosingSymbol(symbols: CodeSymbol[], line: number): CodeSymbol | null {
   let best: CodeSymbol | null = null;
   let bestRange = Infinity;
   for (const sym of symbols) {
@@ -48,183 +119,82 @@ function findEnclosing(symbols: CodeSymbol[], line: number): CodeSymbol | null {
   return best;
 }
 
+function collectCallRefs(
+  node: Parser.SyntaxNode,
+  symbols: CodeSymbol[],
+  results: CallRef[],
+): void {
+  if (node.type === 'new_expression') {
+    const ctorNode = node.childForFieldName('constructor');
+    // Only handle simple identifier — not `new this.Foo()` etc.
+    if (ctorNode?.type === 'identifier') {
+      const line = node.startPosition.row + 1;
+      const enclosing = findEnclosingSymbol(symbols, line);
+      if (enclosing) {
+        results.push({
+          callerSymbolId: enclosing.id,
+          targetName: ctorNode.text,
+          kind: 'instantiation',
+          line,
+        });
+      }
+    }
+  } else if (node.type === 'call_expression') {
+    const funcNode = node.childForFieldName('function');
+    if (funcNode?.type === 'member_expression') {
+      const objNode = funcNode.childForFieldName('object');
+      const propNode = funcNode.childForFieldName('property');
+      // Only handle simple identifiers — skip `this.foo()`, `super.foo()`
+      if (objNode?.type === 'identifier' && propNode) {
+        const line = node.startPosition.row + 1;
+        const enclosing = findEnclosingSymbol(symbols, line);
+        if (enclosing) {
+          results.push({
+            callerSymbolId: enclosing.id,
+            targetName: `${objNode.text}.${propNode.text}`,
+            kind: 'static_call',
+            line,
+          });
+        }
+      }
+    }
+  }
+
+  for (const child of node.namedChildren) {
+    collectCallRefs(child, symbols, results);
+  }
+}
+
 export class TypeScriptParser implements LanguageParser {
   readonly name = 'typescript';
   readonly extensions = ['.ts', '.tsx', '.mts', '.cts'];
 
+  private readonly _parser: Parser;
+
+  constructor() {
+    this._parser = new TreeSitter();
+    this._parser.setLanguage(TSLanguage.typescript);
+  }
+
   extractSymbols(filePath: string, source: string): CodeSymbol[] {
-    const lines = source.split('\n');
+    const ext = filePath.split('.').pop() ?? '';
+    const lang = ext === 'tsx' || ext === 'jsx' ? TSLanguage.tsx : TSLanguage.typescript;
+    this._parser.setLanguage(lang);
+
+    const tree = this._parser.parse(source);
     const results: CodeSymbol[] = [];
-    const scopeStack: Scope[] = [];
-    let depth = 0;
-    let pending: Pending | null = null;
-
-    const getParentFqn = (): string | null => {
-      for (let i = scopeStack.length - 1; i >= 0; i--) {
-        if (scopeStack[i].isClassLike) return scopeStack[i].sym.fqn;
-      }
-      return null;
-    };
-
-    const classBodyDepth = (): number | null => {
-      for (let i = scopeStack.length - 1; i >= 0; i--) {
-        if (scopeStack[i].isClassLike) return scopeStack[i].closeDepth + 1;
-      }
-      return null;
-    };
-
-    const makeSym = (name: string, kind: SymbolKind, lineNum: number): CodeSymbol => {
-      const parentFqn = getParentFqn();
-      const fqn = parentFqn ? `${parentFqn}.${name}` : name;
-      return {
-        id: `${filePath}::${fqn}`,
-        fqn,
-        kind,
-        filePath,
-        lineStart: lineNum,
-        lineEnd: lineNum,
-        language: 'typescript',
-      };
-    };
-
-    const pushDecl = (
-      name: string,
-      kind: SymbolKind,
-      isClassLike: boolean,
-      lineNum: number,
-      opens: number,
-      closes: number,
-    ): void => {
-      const sym = makeSym(name, kind, lineNum);
-      results.push(sym);
-      if (opens > closes) {
-        scopeStack.push({ sym, closeDepth: depth, isClassLike });
-      }
-    };
-
-    for (let i = 0; i < lines.length; i++) {
-      const line = lines[i];
-      const lineNum = i + 1;
-      const trimmed = line.trimStart();
-
-      const opens = countChar(line, '{');
-      const closes = countChar(line, '}');
-
-      // Activate a pending declaration when its opening brace appears
-      if (pending !== null && opens > 0) {
-        const sym = makeSym(pending.name, pending.kind, pending.lineStart);
-        results.push(sym);
-        if (opens > closes) {
-          scopeStack.push({ sym, closeDepth: depth, isClassLike: pending.isClassLike });
-        }
-        pending = null;
-      }
-
-      const cbd = classBodyDepth();
-      const isTopLevel = depth === 0;
-      const inClassBody = cbd !== null && depth === cbd;
-
-      if (isTopLevel) {
-        const cm = trimmed.match(
-          /^(?:export\s+)?(?:default\s+)?(?:abstract\s+)?class\s+([A-Za-z_$][A-Za-z0-9_$]*)/,
-        );
-        if (cm) {
-          if (opens > 0) pushDecl(cm[1], 'class', true, lineNum, opens, closes);
-          else pending = { name: cm[1], kind: 'class', lineStart: lineNum, isClassLike: true };
-        } else {
-          const im = trimmed.match(/^(?:export\s+)?interface\s+([A-Za-z_$][A-Za-z0-9_$]*)/);
-          if (im) {
-            if (opens > 0) pushDecl(im[1], 'interface', true, lineNum, opens, closes);
-            else pending = { name: im[1], kind: 'interface', lineStart: lineNum, isClassLike: true };
-          } else {
-            const fm = trimmed.match(
-              /^(?:export\s+)?(?:async\s+)?function\s+([A-Za-z_$][A-Za-z0-9_$]*)/,
-            );
-            if (fm) {
-              if (opens > 0) pushDecl(fm[1], 'function', false, lineNum, opens, closes);
-              else pending = { name: fm[1], kind: 'function', lineStart: lineNum, isClassLike: false };
-            } else {
-              const tm = trimmed.match(
-                /^(?:export\s+)?type\s+([A-Za-z_$][A-Za-z0-9_$]*)\s*[=<]/,
-              );
-              if (tm) {
-                pushDecl(tm[1], 'type', false, lineNum, opens, closes);
-              } else {
-                const em = trimmed.match(
-                  /^(?:export\s+)?(?:const\s+)?enum\s+([A-Za-z_$][A-Za-z0-9_$]*)/,
-                );
-                if (em) {
-                  if (opens > 0) pushDecl(em[1], 'enum', false, lineNum, opens, closes);
-                  else pending = { name: em[1], kind: 'enum', lineStart: lineNum, isClassLike: false };
-                }
-              }
-            }
-          }
-        }
-      } else if (inClassBody) {
-        const stripped = trimmed.replace(TS_MODIFIERS_RE, '');
-        const mm = stripped.match(/^([a-zA-Z_$][a-zA-Z0-9_$]*)\s*[(<]/);
-        if (mm && !TS_KEYWORDS.has(mm[1])) {
-          if (opens > closes) {
-            pushDecl(mm[1], 'method', false, lineNum, opens, closes);
-          } else {
-            // Single-line body or no body (interface member / abstract method)
-            pushDecl(mm[1], 'method', false, lineNum, opens, closes);
-          }
-        }
-      }
-
-      depth += opens - closes;
-
-      while (scopeStack.length > 0 && depth <= scopeStack[scopeStack.length - 1].closeDepth) {
-        const scope = scopeStack.pop()!;
-        scope.sym.lineEnd = lineNum;
-      }
-    }
-
+    walkNode(tree.rootNode, filePath, 'typescript', null, results);
     return results;
   }
 
   extractCallRefs(filePath: string, source: string, symbols: CodeSymbol[]): CallRef[] {
-    const lines = source.split('\n');
+    const ext = filePath.split('.').pop() ?? '';
+    const lang = ext === 'tsx' || ext === 'jsx' ? TSLanguage.tsx : TSLanguage.typescript;
+    this._parser.setLanguage(lang);
+
+    const tree = this._parser.parse(source);
     const results: CallRef[] = [];
-
-    for (let i = 0; i < lines.length; i++) {
-      const line = lines[i];
-      const lineNum = i + 1;
-
-      // new ClassName(  — simple identifier only
-      const newRe = /\bnew\s+([A-Za-z_$][A-Za-z0-9_$]*)\s*[(<]/g;
-      let m: RegExpExecArray | null;
-      while ((m = newRe.exec(line)) !== null) {
-        const enclosing = findEnclosing(symbols, lineNum);
-        if (enclosing) {
-          results.push({
-            callerSymbolId: enclosing.id,
-            targetName: m[1],
-            kind: 'instantiation',
-            line: lineNum,
-          });
-        }
-      }
-
-      // Identifier.method(  — skip this. and super.
-      const callRe = /\b([A-Za-z_$][A-Za-z0-9_$]*)\.([A-Za-z0-9_$]+)\s*\(/g;
-      while ((m = callRe.exec(line)) !== null) {
-        const obj = m[1];
-        if (obj === 'this' || obj === 'super') continue;
-        const enclosing = findEnclosing(symbols, lineNum);
-        if (enclosing) {
-          results.push({
-            callerSymbolId: enclosing.id,
-            targetName: `${obj}.${m[2]}`,
-            kind: 'static_call',
-            line: lineNum,
-          });
-        }
-      }
-    }
-
+    collectCallRefs(tree.rootNode, symbols, results);
     return results;
   }
 }
