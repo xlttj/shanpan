@@ -16,8 +16,8 @@ implements:
 ---
 # Code Analyzer
 
-Walks source directories, parses files with tree-sitter, and writes CodeSymbol nodes
-and IMPLEMENTS edges into the graph.
+Walks source directories, parses files, and writes CodeSymbol nodes, File nodes,
+CONTAINS edges, and IMPLEMENTS edges into the graph.
 
 `walkFiles` recursively traverses a list of root directories, filtering by file extension
 and skipping excluded directory names. Returns absolute file paths.
@@ -29,4 +29,9 @@ declared in spec frontmatter. Only symbols that exist in the extracted set produ
 symbol ID was not found in the extracted set. These are drift warnings.
 
 `analyzeAndIndex` orchestrates the full pipeline: walk → parse per language → upsert
-CodeSymbol nodes → resolve implementations → create IMPLEMENTS edges → collect drift warnings.
+CodeSymbol nodes → upsert File nodes → create CONTAINS edges (File→CodeSymbol for
+top-level symbols, CodeSymbol→CodeSymbol for methods within a class) → resolve
+implementations → create IMPLEMENTS edges → collect drift warnings. Spec `implements`
+entries with `type: file` are handled directly: the file is upserted as a File node and
+an IMPLEMENTS edge is created if the file exists, or a drift warning is recorded if it
+does not.

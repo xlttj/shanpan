@@ -15,9 +15,11 @@ Exposes the specgraph knowledge graph to AI agents via the Model Context Protoco
 `runMcp` starts a `@modelcontextprotocol/sdk` stdio server with the following tools:
 
 **Read tools**: `list_specs`, `get_spec`, `list_rules`, `get_symbols_for_spec`,
-`get_specs_for_symbol`, `get_drift_report`, `query_graph`.
+`get_specs_for_symbol`, `get_specs_for_symbol_with_context`, `get_drift_report`,
+`get_unspecced_symbols`, `search_symbols`, `get_callers`, `get_callees`, `get_impact`,
+`query_graph`.
 
-**Write tools**: `create_spec`, `update_spec`.
+**Write tools**: `create_spec`, `update_spec`, `reindex`.
 
 `query_graph` rejects mutating Cypher keywords (CREATE, MERGE, SET, DELETE, REMOVE, DROP,
 ALTER, CALL) to prevent accidental graph mutation. All other tools that need the DB open it

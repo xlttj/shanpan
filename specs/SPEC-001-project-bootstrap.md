@@ -2,18 +2,14 @@
 id: "SPEC-001"
 title: "SpecGraph – Project Bootstrap"
 type: project_spec
-status: draft
+status: active
 priority: high
 author: axel
 created: 2026-03-21
-depends_on: []
-implements: []
-tags: [bootstrap, infrastructure]
 ---
 
 # SpecGraph – Project Bootstrap
 
-SpecGraph ist ein eigenständiges CLI-Tool, das Spezifikationen und Business Rules
-als Knowledge Graph in LadybugDB speichert und über MCP für KI-Agents abfragbar macht.
-Es verbindet menschliche Intention (Specs, Rules) mit Code-Symbolen über typisierte
-n:n-Relationen.
+SpecGraph is a standalone CLI tool that stores specifications and business rules as a
+knowledge graph in LadybugDB and makes them queryable for AI agents via MCP. It links
+human intention (specs, rules) to code symbols via typed many-to-many relationships.
