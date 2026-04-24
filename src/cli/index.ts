@@ -42,7 +42,8 @@ program
 program
   .command('mcp')
   .description('Start MCP server (stdio)')
-  .action(() => runMcp());
+  .option('--project-dir <path>', 'Project root containing .specgraph/ (defaults to cwd)')
+  .action((opts) => runMcp({ projectDir: opts.projectDir as string | undefined }));
 
 program
   .command('analyze')

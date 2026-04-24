@@ -22,15 +22,14 @@ specgraph analyze   # scan source code and link symbols to specs
 
 ## MCP configuration
 
-Add the following to your MCP client's server configuration. `cwd` must be the absolute path to the project root that contains `.specgraph/`.
+Add the following to your MCP client's server configuration. `--project-dir` must be the absolute path to the project root that contains `.specgraph/`.
 
 ```json
 {
   "mcpServers": {
     "specgraph": {
       "command": "specgraph",
-      "args": ["mcp"],
-      "cwd": "/absolute/path/to/your/project"
+      "args": ["mcp", "--project-dir", "/absolute/path/to/your/project"]
     }
   }
 }

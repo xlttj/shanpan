@@ -252,8 +252,8 @@ export async function handleGetSpecsForSymbolWithContext(
   }
 }
 
-export async function runMcp(): Promise<void> {
-  const projectDir = process.cwd();
+export async function runMcp(options: { projectDir?: string } = {}): Promise<void> {
+  const projectDir = options.projectDir ? path.resolve(options.projectDir) : process.cwd();
 
   const server = new Server(
     { name: 'specgraph', version: '0.1.0' },
