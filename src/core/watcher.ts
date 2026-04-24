@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import chalk from 'chalk';
+import parcelWatcher from '@parcel/watcher';
 import type { SpecGraphConfig } from '../types/config.js';
 import { DB_DIR } from './db.js';
 
@@ -34,39 +35,38 @@ export interface WatchOptions {
  * debounces events, and calls `onFlush` with the accumulated paths.
  * Returns a stop function to tear down watchers and resolve cleanly.
  */
-export function watchAndReindex(
+export async function watchAndReindex(
   projectDir: string,
   config: SpecGraphConfig,
   options: WatchOptions,
-): () => Promise<void> {
-  // Resolve symlinks so that watch-root paths match what FSEvents reports on macOS
-  // (e.g. /tmp is a symlink to /private/tmp; without this the relative-path
-  // computation in the event callback silently produces garbage).
+): Promise<() => Promise<void>> {
   try { projectDir = fs.realpathSync(projectDir); } catch { /* keep original */ }
 
   const log = options.log ?? ((line) => console.log(line));
+
   const watchRoots = new Set<string>();
   for (const dir of config.analyze.include) {
-    const abs = path.resolve(projectDir, dir);
-    if (abs === projectDir) {
-      // Watching the project root directly would also watch .specgraph/, .git/,
-      // etc. On macOS, fs.watch may report only the basename (not the full
-      // relative path) for nested events, making path-based filtering unreliable.
-      // Instead, enumerate non-ignored immediate subdirectories and watch those.
-      try {
-        for (const entry of fs.readdirSync(projectDir, { withFileTypes: true })) {
-          if (!entry.isDirectory()) continue;
-          if (shouldIgnore(entry.name, config.analyze.exclude)) continue;
-          watchRoots.add(path.join(projectDir, entry.name));
-        }
-      } catch { /* skip if enumeration fails */ }
-    } else {
-      watchRoots.add(abs);
-    }
+    watchRoots.add(path.resolve(projectDir, dir));
   }
-  watchRoots.add(path.resolve(projectDir, config.specsDir));
 
-  const watchers: fs.FSWatcher[] = [];
+  // Add specsDir only when it is not already covered by an include root.
+  const specsDirAbs = path.resolve(projectDir, config.specsDir);
+  const coveredByInclude = [...watchRoots].some(
+    (root) => specsDirAbs === root || specsDirAbs.startsWith(root + path.sep),
+  );
+  if (!coveredByInclude) {
+    watchRoots.add(specsDirAbs);
+  }
+
+  // Absolute-path ignore list passed to @parcel/watcher's native backend.
+  // Top-level excludes are listed explicitly; nested occurrences (e.g. src/node_modules)
+  // are caught by the shouldIgnore fallback in the event callback.
+  const ignoreList: string[] = [
+    path.join(projectDir, DB_DIR),
+    path.join(projectDir, '.git'),
+    ...config.analyze.exclude.map((d) => path.join(projectDir, d)),
+  ];
+
   let pendingPaths = new Set<string>();
   let timer: NodeJS.Timeout | null = null;
   let flushing = false;
@@ -107,23 +107,31 @@ export function watchAndReindex(
     }
   };
 
-  const onEvent = (root: string, filename: string | null) => {
-    if (stopped) return;
-    if (!filename) return; // indeterminate event; can't tell if it's from .specgraph
-    const rel = path.relative(projectDir, path.join(root, filename));
-    if (shouldIgnore(rel, config.analyze.exclude)) return;
-    pendingPaths.add(rel);
-    scheduleFlush();
-  };
+  const subscriptions: Awaited<ReturnType<typeof parcelWatcher.subscribe>>[] = [];
 
   for (const root of watchRoots) {
     if (!fs.existsSync(root)) continue;
     try {
-      const watcher = fs.watch(root, { recursive: true }, (_event, filename) =>
-        onEvent(root, filename),
+      const sub = await parcelWatcher.subscribe(
+        root,
+        (err, events) => {
+          if (stopped) return;
+          if (err) {
+            log(chalk.yellow(`watcher error: ${err.message}`));
+            return;
+          }
+          let added = 0;
+          for (const event of events) {
+            const rel = path.relative(projectDir, event.path);
+            if (shouldIgnore(rel, config.analyze.exclude)) continue;
+            pendingPaths.add(rel);
+            added++;
+          }
+          if (added > 0) scheduleFlush();
+        },
+        { ignore: ignoreList },
       );
-      watcher.on('error', (err) => log(chalk.yellow(`watcher error: ${err.message}`)));
-      watchers.push(watcher);
+      subscriptions.push(sub);
     } catch (err) {
       log(chalk.yellow(`failed to watch ${root}: ${(err as Error).message}`));
     }
@@ -143,7 +151,7 @@ export function watchAndReindex(
       clearTimeout(timer);
       timer = null;
     }
-    for (const w of watchers) w.close();
-    watchers.length = 0;
+    await Promise.all(subscriptions.map((s) => s.unsubscribe()));
+    subscriptions.length = 0;
   };
 }

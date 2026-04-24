@@ -35,7 +35,7 @@ describe('watchAndReindex', () => {
       analyze: { ...DEFAULT_CONFIG.analyze, include: ['src'] },
     };
 
-    const stop = watchAndReindex(tmpDir, config, {
+    const stop = await watchAndReindex(tmpDir, config, {
       log: () => {}, // silence output in tests
       onFlush: async (paths) => {
         flushCount++;
@@ -67,7 +67,7 @@ describe('watchAndReindex', () => {
       analyze: { ...DEFAULT_CONFIG.analyze, include: ['.'] },
     };
 
-    const stop = watchAndReindex(tmpDir, config, {
+    const stop = await watchAndReindex(tmpDir, config, {
       log: () => {},
       onFlush: async () => {
         flushCount++;

@@ -103,7 +103,7 @@ export async function runAnalyze(options: {
   if (!options.watch) return;
 
   console.log('');
-  const stop = watchAndReindex(projectDir, config, {
+  const stop = await watchAndReindex(projectDir, config, {
     onFlush: async () => runOneAnalyze(projectDir, config, false),
   });
 
