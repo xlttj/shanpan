@@ -39,6 +39,11 @@ export function watchAndReindex(
   config: SpecGraphConfig,
   options: WatchOptions,
 ): () => Promise<void> {
+  // Resolve symlinks so that watch-root paths match what FSEvents reports on macOS
+  // (e.g. /tmp is a symlink to /private/tmp; without this the relative-path
+  // computation in the event callback silently produces garbage).
+  try { projectDir = fs.realpathSync(projectDir); } catch { /* keep original */ }
+
   const log = options.log ?? ((line) => console.log(line));
   const watchRoots = new Set<string>();
   for (const dir of config.analyze.include) watchRoots.add(path.resolve(projectDir, dir));
@@ -87,10 +92,7 @@ export function watchAndReindex(
 
   const onEvent = (root: string, filename: string | null) => {
     if (stopped) return;
-    if (!filename) {
-      scheduleFlush();
-      return;
-    }
+    if (!filename) return; // indeterminate event; can't tell if it's from .specgraph
     const rel = path.relative(projectDir, path.join(root, filename));
     if (shouldIgnore(rel, config.analyze.exclude)) return;
     pendingPaths.add(rel);
