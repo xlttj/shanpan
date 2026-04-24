@@ -46,7 +46,24 @@ export function watchAndReindex(
 
   const log = options.log ?? ((line) => console.log(line));
   const watchRoots = new Set<string>();
-  for (const dir of config.analyze.include) watchRoots.add(path.resolve(projectDir, dir));
+  for (const dir of config.analyze.include) {
+    const abs = path.resolve(projectDir, dir);
+    if (abs === projectDir) {
+      // Watching the project root directly would also watch .specgraph/, .git/,
+      // etc. On macOS, fs.watch may report only the basename (not the full
+      // relative path) for nested events, making path-based filtering unreliable.
+      // Instead, enumerate non-ignored immediate subdirectories and watch those.
+      try {
+        for (const entry of fs.readdirSync(projectDir, { withFileTypes: true })) {
+          if (!entry.isDirectory()) continue;
+          if (shouldIgnore(entry.name, config.analyze.exclude)) continue;
+          watchRoots.add(path.join(projectDir, entry.name));
+        }
+      } catch { /* skip if enumeration fails */ }
+    } else {
+      watchRoots.add(abs);
+    }
+  }
   watchRoots.add(path.resolve(projectDir, config.specsDir));
 
   const watchers: fs.FSWatcher[] = [];
