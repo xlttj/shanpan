@@ -131,13 +131,21 @@ export async function watchAndReindex(
       const relevantIgnores = ignoreList.filter(
         (p) => p === root || p.startsWith(rootPrefix),
       );
+      const DEBUG = process.env.SPECGRAPH_WATCHER_DEBUG === '1';
+      if (DEBUG) console.error(`[watcher] subscribe root=${root} ignore=${JSON.stringify(relevantIgnores)}`);
       const sub = await parcelWatcher.subscribe(
         root,
         (err, events) => {
           if (stopped) return;
           if (err) {
+            if (DEBUG) console.error(`[watcher] error from root=${root}:`, err);
             log(chalk.yellow(`watcher error: ${err.message}`));
             return;
+          }
+          if (DEBUG) {
+            for (const e of events) {
+              console.error(`[watcher] root=${root} type=${e.type} path=${e.path}`);
+            }
           }
           let added = 0;
           for (const event of events) {
