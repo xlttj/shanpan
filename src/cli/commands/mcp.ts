@@ -746,4 +746,12 @@ export async function runMcp(): Promise<void> {
 
   const transport = new StdioServerTransport();
   await server.connect(transport);
+
+  // server.connect() resolves immediately after registering stdin listeners.
+  // Block here until the client closes the pipe, so the process.exit(0) in
+  // the CLI entry point doesn't terminate us before the first handshake.
+  await new Promise<void>((resolve) => {
+    process.stdin.once('close', resolve);
+    if (process.stdin.destroyed || process.stdin.readableEnded) resolve();
+  });
 }
