@@ -46,7 +46,21 @@ export async function watchAndReindex(
 
   const watchRoots = new Set<string>();
   for (const dir of config.analyze.include) {
-    watchRoots.add(path.resolve(projectDir, dir));
+    const abs = path.resolve(projectDir, dir);
+    if (abs === projectDir) {
+      // Watching the project root directly risks receiving FSEvents coalesced
+      // events at the root level on macOS, bypassing path-based ignore checks.
+      // Instead, enumerate non-ignored immediate subdirectories and watch those.
+      try {
+        for (const entry of fs.readdirSync(projectDir, { withFileTypes: true })) {
+          if (!entry.isDirectory()) continue;
+          if (shouldIgnore(entry.name, config.analyze.exclude)) continue;
+          watchRoots.add(path.join(projectDir, entry.name));
+        }
+      } catch { /* skip if enumeration fails */ }
+    } else {
+      watchRoots.add(abs);
+    }
   }
 
   // Add specsDir only when it is not already covered by an include root.
@@ -58,9 +72,8 @@ export async function watchAndReindex(
     watchRoots.add(specsDirAbs);
   }
 
-  // Absolute-path ignore list passed to @parcel/watcher's native backend.
-  // Top-level excludes are listed explicitly; nested occurrences (e.g. src/node_modules)
-  // are caught by the shouldIgnore fallback in the event callback.
+  // Absolute-path ignore list: passed to each subscription for defence-in-depth
+  // against nested excluded directories (e.g. src/node_modules).
   const ignoreList: string[] = [
     path.join(projectDir, DB_DIR),
     path.join(projectDir, '.git'),
