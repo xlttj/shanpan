@@ -125,6 +125,12 @@ export async function watchAndReindex(
   for (const root of watchRoots) {
     if (!fs.existsSync(root)) continue;
     try {
+      // FSEventStreamSetExclusionPaths on macOS misbehaves when exclusion paths
+      // lie outside the watch root — only pass entries that are inside this root.
+      const rootPrefix = root + path.sep;
+      const relevantIgnores = ignoreList.filter(
+        (p) => p === root || p.startsWith(rootPrefix),
+      );
       const sub = await parcelWatcher.subscribe(
         root,
         (err, events) => {
@@ -142,7 +148,7 @@ export async function watchAndReindex(
           }
           if (added > 0) scheduleFlush();
         },
-        { ignore: ignoreList },
+        { ignore: relevantIgnores },
       );
       subscriptions.push(sub);
     } catch (err) {
