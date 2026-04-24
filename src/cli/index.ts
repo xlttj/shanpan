@@ -112,7 +112,14 @@ program
   .option('--staged', 'Check staged git changes for symbol deletions/renames')
   .action((opts) => runCheck({ staged: !!opts.staged }));
 
-program.parseAsync(process.argv).catch((err: Error) => {
-  console.error(err.message);
-  process.exit(1);
-});
+// process.exit() prevents V8 from running GC finalizers in an unspecified
+// order after the command completes. Without this, the simultaneous presence
+// of multiple native addons (tree-sitter, LadybugDB) causes a segfault on
+// macOS because their native destructors execute in the wrong sequence.
+program
+  .parseAsync(process.argv)
+  .then(() => process.exit(0))
+  .catch((err: Error) => {
+    console.error(err.message);
+    process.exit(1);
+  });
