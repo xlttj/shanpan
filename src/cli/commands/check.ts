@@ -1,6 +1,9 @@
 import chalk from 'chalk';
 import { execFileSync } from 'node:child_process';
 import { openDatabase, closeDatabase, dbExists, queryAll, escId } from '../../core/db.js';
+import { loadConfig } from '../../core/config.js';
+import { findSpecFiles, parseSpecFile } from '../../core/parser.js';
+import path from 'node:path';
 
 interface StagedChanges {
   removed: string[]; // deleted or renamed — symbol IDs definitively broken
@@ -47,8 +50,56 @@ function escList(paths: string[]): string {
   return paths.map((p) => `'${escId(p)}'`).join(', ');
 }
 
-export async function runCheck(options: { staged: boolean }): Promise<void> {
+async function runHookOutputCheck(projectDir: string): Promise<void> {
+  if (!dbExists(projectDir)) {
+    process.stdout.write('{}');
+    return;
+  }
+
+  const { db, conn } = await openDatabase(projectDir, true);
+  let brokenCount = 0;
+  try {
+    const { rows } = await queryAll(
+      conn,
+      'MATCH (c:CodeSymbol) RETURN c.id AS id',
+    );
+    const knownIds = new Set(rows.map((r) => String(r['id'])));
+
+    const config = loadConfig(projectDir);
+    const specsDir = path.resolve(projectDir, config.specsDir);
+    for (const filePath of findSpecFiles(specsDir)) {
+      try {
+        const parsed = parseSpecFile(filePath);
+        for (const impl of parsed.frontmatter.implements ?? []) {
+          if (!knownIds.has(impl.symbol)) brokenCount++;
+        }
+      } catch {
+        // skip malformed
+      }
+    }
+  } finally {
+    await closeDatabase(db, conn);
+  }
+
+  if (brokenCount > 0) {
+    process.stdout.write(
+      JSON.stringify({
+        decision: 'block',
+        reason: `Spec drift: ${brokenCount} broken link${brokenCount === 1 ? '' : 's'} detected. Run \`specgraph check\` or use the MCP \`get_drift_report\` tool.`,
+      }),
+    );
+  } else {
+    process.stdout.write('{}');
+  }
+}
+
+export async function runCheck(options: { staged: boolean; hookOutput?: boolean }): Promise<void> {
   const projectDir = process.cwd();
+
+  if (options.hookOutput) {
+    await runHookOutputCheck(projectDir);
+    return;
+  }
 
   if (!dbExists(projectDir)) {
     console.log(chalk.gray('No SpecGraph database found — skipping spec integrity check.'));

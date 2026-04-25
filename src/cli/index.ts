@@ -8,7 +8,6 @@ import { runAnalyze } from './commands/analyze.js';
 import { runCreate } from './commands/create.js';
 import { runUpdate } from './commands/update.js';
 import { runCheck } from './commands/check.js';
-import { runInstallHooks, runUninstallHooks } from './commands/hook.js';
 
 const program = new Command();
 
@@ -62,16 +61,6 @@ program
   );
 
 program
-  .command('install-hooks')
-  .description('Install git post-commit hook that runs specgraph analyze automatically')
-  .action(() => runInstallHooks());
-
-program
-  .command('uninstall-hooks')
-  .description('Remove the specgraph block from .git/hooks/post-commit')
-  .action(() => runUninstallHooks());
-
-program
   .command('create')
   .description('Create a new spec file')
   .requiredOption('--id <id>', 'Spec ID, e.g. SPEC-042 or RULE-007')
@@ -111,7 +100,8 @@ program
   .command('check')
   .description('Check for spec drift (use --staged in pre-commit hooks)')
   .option('--staged', 'Check staged git changes for symbol deletions/renames')
-  .action((opts) => runCheck({ staged: !!opts.staged }));
+  .option('--hook-output', 'Output JSON for use in IDE Stop hooks')
+  .action((opts) => runCheck({ staged: !!opts.staged, hookOutput: !!opts.hookOutput }));
 
 // process.exit() prevents V8 from running GC finalizers in an unspecified
 // order after the command completes. Without this, the simultaneous presence

@@ -34,5 +34,3 @@ the directories written so the user can confirm placement.
 
 - **spec-lookup** — find specs that govern a symbol or topic before implementing
 - **create-spec** — create a new spec with correct frontmatter and link it to symbols
-- **check-drift** — detect and fix broken symbol links after refactoring
-- **analyze-and-link** — reindex the graph and link new symbols to specs after coding
