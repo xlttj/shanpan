@@ -1,5 +1,4 @@
 ---
-id: SPEC-012
 title: Agent Skill Installation
 type: software_requirement
 status: active

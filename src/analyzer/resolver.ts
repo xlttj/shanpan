@@ -29,7 +29,7 @@ export function resolveImplementations(
       if (symbolIds.has(impl.symbol)) {
         links.push({
           symbolId: impl.symbol,
-          specId: spec.frontmatter.id,
+          specId: spec.id,
           confidence: 1.0,
         });
       }
@@ -54,7 +54,7 @@ export function findUnresolvedImplementations(
   for (const spec of specs) {
     for (const impl of spec.frontmatter.implements ?? []) {
       if (!symbolIds.has(impl.symbol)) {
-        unresolved.push({ specId: spec.frontmatter.id, symbolId: impl.symbol });
+        unresolved.push({ specId: spec.id, symbolId: impl.symbol });
       }
     }
   }

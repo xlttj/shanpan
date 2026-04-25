@@ -1,5 +1,4 @@
 ---
-id: "SPEC-001"
 title: "SpecGraph – Project Bootstrap"
 type: project_spec
 status: active

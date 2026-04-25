@@ -1,5 +1,4 @@
 ---
-id: SPEC-005
 title: MCP Server
 type: software_requirement
 status: active

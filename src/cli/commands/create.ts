@@ -5,18 +5,15 @@ import { loadConfig } from '../../core/config.js';
 import { createSpec, ALLOWED_SPEC_TYPES } from '../../core/spec-writer.js';
 
 export async function runCreate(options: {
-  id: string;
   title: string;
   type: string;
+  dir?: string;
   symbols?: string[];
-  dependsOn?: string[];
-  derivesFrom?: string[];
 }): Promise<void> {
   const projectDir = process.cwd();
   const config = loadConfig(projectDir);
   const specsDir = path.resolve(projectDir, config.specsDir);
 
-  // Validate type early so the error is clear before any DB access
   if (!ALLOWED_SPEC_TYPES.includes(options.type as (typeof ALLOWED_SPEC_TYPES)[number])) {
     console.error(
       chalk.red(
@@ -26,7 +23,6 @@ export async function runCreate(options: {
     process.exit(1);
   }
 
-  // If symbol IDs were provided and the DB exists, warn about any that aren't found
   if (options.symbols && options.symbols.length > 0 && dbExists(projectDir)) {
     const { db, conn } = await openDatabase(projectDir, true);
     try {
@@ -48,12 +44,10 @@ export async function runCreate(options: {
 
   try {
     const { filePath } = createSpec({
-      id: options.id,
       title: options.title,
       type: options.type,
+      dir: options.dir,
       symbols: options.symbols,
-      dependsOn: options.dependsOn,
-      derivesFrom: options.derivesFrom,
       specsDir,
     });
 

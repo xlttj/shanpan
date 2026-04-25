@@ -151,9 +151,9 @@ export async function analyzeAndIndex(
   for (const spec of specs) {
     for (const impl of spec.frontmatter.implements ?? []) {
       if (impl.type === 'file') {
-        const list = fileImplsBySpecId.get(spec.frontmatter.id) ?? [];
+        const list = fileImplsBySpecId.get(spec.id) ?? [];
         list.push(impl.symbol);
-        fileImplsBySpecId.set(spec.frontmatter.id, list);
+        fileImplsBySpecId.set(spec.id, list);
       }
     }
   }

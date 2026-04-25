@@ -1,11 +1,8 @@
 ---
-id: SPEC-009
 title: Symbol search via MCP
 type: software_requirement
 status: active
 created: '2026-04-17'
-depends_on:
-  - SPEC-005
 implements:
   - symbol: src/cli/commands/mcp.ts::handleSearchSymbols
     type: function
@@ -69,16 +66,6 @@ and `.` to produce a list of words. The symbol matches if `query` (lowercased)
 is a prefix of any resulting word. For example, `"sign"` matches
 `signInWithGoogle` because splitting on capitals yields `["sign","In","With",
 "Google"]` and `"sign"` is a prefix of `"sign"`.
-
-`%` and `_` in the user query are escaped before being used in Cypher CONTAINS
-comparisons to prevent unintended wildcard behaviour.
-
-## Implementation notes
-
-`handleSearchSymbols` is extracted as a named top-level function (same pattern
-as SPEC-008) and registered alongside the other tools in `runMcp`. The three
-passes can be implemented as three separate Cypher queries followed by a merge
-in TypeScript; avoid constructing a single enormous Cypher UNION for readability.
 
 ## Acceptance criteria
 

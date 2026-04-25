@@ -18,29 +18,26 @@ afterEach(() => {
 describe('createSpec', () => {
   it('creates a .md file at the correct path', () => {
     const { filePath } = createSpec({
-      id: 'SPEC-001',
       title: 'Test Spec',
       type: 'intent',
       specsDir: tmpDir,
     });
     expect(fs.existsSync(filePath)).toBe(true);
-    expect(filePath).toBe(path.join(tmpDir, 'spec-001.md'));
+    expect(filePath).toBe(path.join(tmpDir, 'test-spec.md'));
   });
 
-  it('derives the filename from the ID (lowercase)', () => {
-    createSpec({ id: 'RULE-007', title: 'A rule', type: 'business_rule', specsDir: tmpDir });
-    expect(fs.existsSync(path.join(tmpDir, 'rule-007.md'))).toBe(true);
+  it('derives the filename from the title slug', () => {
+    createSpec({ title: 'A Rule', type: 'business_rule', specsDir: tmpDir });
+    expect(fs.existsSync(path.join(tmpDir, 'a-rule.md'))).toBe(true);
   });
 
   it('produces a file that round-trips through parseSpecFile', () => {
     const { filePath } = createSpec({
-      id: 'SPEC-002',
       title: 'Round-trip test',
       type: 'software_requirement',
       specsDir: tmpDir,
     });
     const parsed = parseSpecFile(filePath);
-    expect(parsed.frontmatter.id).toBe('SPEC-002');
     expect(parsed.frontmatter.title).toBe('Round-trip test');
     expect(parsed.frontmatter.type).toBe('software_requirement');
     expect(parsed.frontmatter.status).toBe('draft');
@@ -48,7 +45,6 @@ describe('createSpec', () => {
 
   it('sets today\'s date in the created field', () => {
     const { filePath } = createSpec({
-      id: 'SPEC-003',
       title: 'Date test',
       type: 'intent',
       specsDir: tmpDir,
@@ -59,27 +55,25 @@ describe('createSpec', () => {
   });
 
   it('throws if the file already exists', () => {
-    const opts = { id: 'SPEC-004', title: 'Dup', type: 'intent', specsDir: tmpDir };
+    const opts = { title: 'Dup', type: 'intent', specsDir: tmpDir };
     createSpec(opts);
     expect(() => createSpec(opts)).toThrow('already exists');
   });
 
   it('throws on an invalid spec type', () => {
     expect(() =>
-      createSpec({ id: 'SPEC-005', title: 'Bad type', type: 'unknown_type', specsDir: tmpDir }),
+      createSpec({ title: 'Bad type', type: 'unknown_type', specsDir: tmpDir }),
     ).toThrow('Invalid spec type');
   });
 
   it('accepts all allowed types without throwing', () => {
     for (const type of ALLOWED_SPEC_TYPES) {
-      const id = `TEST-${type.toUpperCase().replace(/_/g, '-')}`;
-      expect(() => createSpec({ id, title: type, type, specsDir: tmpDir })).not.toThrow();
+      expect(() => createSpec({ title: type, type, specsDir: tmpDir })).not.toThrow();
     }
   });
 
   it('populates implements when symbols are provided', () => {
     const { filePath } = createSpec({
-      id: 'SPEC-006',
       title: 'With symbols',
       type: 'business_rule',
       symbols: ['src/foo.ts::Foo', 'src/bar.ts::Bar.doWork'],
@@ -93,7 +87,6 @@ describe('createSpec', () => {
 
   it('omits implements when no symbols are provided', () => {
     const { filePath } = createSpec({
-      id: 'SPEC-007',
       title: 'No symbols',
       type: 'intent',
       specsDir: tmpDir,
@@ -102,21 +95,15 @@ describe('createSpec', () => {
     expect(parsed.frontmatter.implements).toBeUndefined();
   });
 
-  it('populates depends_on when dependsOn is provided', () => {
-    const { filePath } = createSpec({
-      id: 'SPEC-008',
-      title: 'Deps',
-      type: 'intent',
-      dependsOn: ['SPEC-001'],
-      specsDir: tmpDir,
-    });
-    const parsed = parseSpecFile(filePath);
-    expect(parsed.frontmatter.depends_on).toEqual(['SPEC-001']);
-  });
-
   it('creates the specsDir if it does not exist', () => {
     const nestedDir = path.join(tmpDir, 'deep', 'specs');
-    createSpec({ id: 'SPEC-009', title: 'Nested', type: 'intent', specsDir: nestedDir });
-    expect(fs.existsSync(path.join(nestedDir, 'spec-009.md'))).toBe(true);
+    createSpec({ title: 'Nested', type: 'intent', specsDir: nestedDir });
+    expect(fs.existsSync(path.join(nestedDir, 'nested.md'))).toBe(true);
+  });
+
+  it('places the file in a subdirectory when dir is provided', () => {
+    const { filePath } = createSpec({ title: 'Sub spec', type: 'intent', specsDir: tmpDir, dir: 'core' });
+    expect(filePath).toBe(path.join(tmpDir, 'core', 'sub-spec.md'));
+    expect(fs.existsSync(filePath)).toBe(true);
   });
 });

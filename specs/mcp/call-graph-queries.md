@@ -1,12 +1,8 @@
 ---
-id: SPEC-008
 title: Call-graph queries via MCP
 type: software_requirement
 status: active
 created: '2026-04-17'
-depends_on:
-  - SPEC-003
-  - SPEC-005
 implements:
   - symbol: src/cli/commands/mcp.ts::handleGetCallers
     type: function
@@ -17,16 +13,15 @@ implements:
 ---
 # Call-graph queries via MCP
 
-Exposes the CALLS edge graph built by the code analyzer (SPEC-003) as three
-dedicated MCP tools, so AI agents can answer "who calls this?" and "what breaks
-if I change this?" without writing raw Cypher queries.
+Exposes the CALLS edge graph built by the code analyzer as three dedicated MCP tools,
+so AI agents can answer "who calls this?" and "what breaks if I change this?" without
+writing raw Cypher queries.
 
 ## Background
 
 The analyzer already records every `static_call` and `instantiation` reference
 as a `(CodeSymbol)-[:CALLS {kind, line}]->(CodeSymbol)` edge in LadybugDB.
-Currently no MCP tool exposes this data. Agents must use `query_graph` with
-hand-written Cypher, which requires knowing the exact schema and is error-prone.
+These tools expose that data without requiring agents to write hand-crafted Cypher.
 
 ## Tools
 

@@ -1,5 +1,4 @@
 ---
-id: RULE-001
 title: No annotations in source code
 type: business_rule
 status: active

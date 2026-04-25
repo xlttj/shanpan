@@ -26,23 +26,23 @@ export async function indexSpecs(
     specs: 0,
     rules: 0,
     symbols: 0,
-    dependsOn: 0,
-    derivesFrom: 0,
     defines: 0,
     implements: 0,
   };
 
   // Insert Spec nodes
-  for (const { frontmatter: f, content } of specs) {
+  for (const { id, frontmatter: f, content } of specs) {
+    const criteria = f.acceptance_criteria ? JSON.stringify(f.acceptance_criteria) : null;
     const cypher = `CREATE (:Spec {
-      id: ${esc(f.id)},
+      id: ${esc(id)},
       title: ${esc(f.title)},
       type: ${esc(f.type)},
       status: ${esc(f.status)},
       priority: ${esc(f.priority)},
       author: ${esc(f.author)},
       created: ${escDate(f.created)},
-      description: ${esc(content)}
+      description: ${esc(content)},
+      acceptance_criteria: ${esc(criteria)}
     })`;
     const result = await conn.query(cypher);
     if (!Array.isArray(result)) result.close();
@@ -94,32 +94,10 @@ export async function indexSpecs(
     }
   }
 
-  // Insert DEPENDS_ON edges
-  for (const { frontmatter: f } of specs) {
-    for (const depId of f.depends_on ?? []) {
-      const cypher = `MATCH (a:Spec {id: ${esc(f.id)}}), (b:Spec {id: ${esc(depId)}})
-        CREATE (a)-[:DEPENDS_ON]->(b)`;
-      const result = await conn.query(cypher);
-      if (!Array.isArray(result)) result.close();
-      stats.dependsOn++;
-    }
-  }
-
-  // Insert DERIVES_FROM edges
-  for (const { frontmatter: f } of specs) {
-    for (const srcId of f.derives_from ?? []) {
-      const cypher = `MATCH (a:Spec {id: ${esc(f.id)}}), (b:Spec {id: ${esc(srcId)}})
-        CREATE (a)-[:DERIVES_FROM]->(b)`;
-      const result = await conn.query(cypher);
-      if (!Array.isArray(result)) result.close();
-      stats.derivesFrom++;
-    }
-  }
-
   // Insert DEFINES edges (Spec -> BusinessRule)
-  for (const { frontmatter: f } of specs) {
+  for (const { id, frontmatter: f } of specs) {
     for (const ruleId of f.defines_rules ?? []) {
-      const cypher = `MATCH (s:Spec {id: ${esc(f.id)}}), (r:BusinessRule {id: ${esc(ruleId)}})
+      const cypher = `MATCH (s:Spec {id: ${esc(id)}}), (r:BusinessRule {id: ${esc(ruleId)}})
         CREATE (s)-[:DEFINES]->(r)`;
       const result = await conn.query(cypher);
       if (!Array.isArray(result)) result.close();
@@ -127,11 +105,11 @@ export async function indexSpecs(
     }
   }
 
-  // Insert IMPLEMENTS edges (CodeSymbol -> Spec | BusinessRule)
-  for (const { frontmatter: f } of specs) {
+  // Insert IMPLEMENTS edges (CodeSymbol -> Spec)
+  for (const { id, frontmatter: f } of specs) {
     for (const impl of f.implements ?? []) {
       const symbolId = impl.symbol;
-      const cypher = `MATCH (c:CodeSymbol {id: ${esc(symbolId)}}), (s:Spec {id: ${esc(f.id)}})
+      const cypher = `MATCH (c:CodeSymbol {id: ${esc(symbolId)}}), (s:Spec {id: ${esc(id)}})
         CREATE (c)-[:IMPLEMENTS {confidence: 1.0}]->(s)`;
       const result = await conn.query(cypher);
       if (!Array.isArray(result)) result.close();
@@ -175,9 +153,7 @@ export async function getGraphStats(conn: Connection): Promise<{
     countNode('CodeSymbol'),
   ]);
 
-  const [dependsOn, derivesFrom, defines, constrains, implements_, calls] = await Promise.all([
-    countRel('DEPENDS_ON'),
-    countRel('DERIVES_FROM'),
+  const [defines, constrains, implements_, calls] = await Promise.all([
     countRel('DEFINES'),
     countRel('CONSTRAINS'),
     countRel('IMPLEMENTS'),
@@ -189,8 +165,6 @@ export async function getGraphStats(conn: Connection): Promise<{
     rules,
     symbols,
     edges: {
-      DEPENDS_ON: dependsOn,
-      DERIVES_FROM: derivesFrom,
       DEFINES: defines,
       CONSTRAINS: constrains,
       IMPLEMENTS: implements_,

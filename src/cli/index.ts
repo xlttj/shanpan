@@ -63,27 +63,23 @@ program
 program
   .command('create')
   .description('Create a new spec file')
-  .requiredOption('--id <id>', 'Spec ID, e.g. SPEC-042 or RULE-007')
   .requiredOption('--title <title>', 'Human-readable title')
-  .requiredOption('--type <type>', 'intent | business_rule | software_requirement')
+  .requiredOption('--type <type>', 'intent | business_rule | software_requirement | project_spec')
+  .option('--dir <dir>', 'Subdirectory under specsDir, e.g. core, cli')
   .option('--symbol <ids...>', 'Symbol IDs to link via implements')
-  .option('--depends-on <ids...>', 'Spec IDs this spec depends on')
-  .option('--derives-from <ids...>', 'Spec IDs this spec derives from')
   .action((opts) =>
     runCreate({
-      id: opts.id as string,
       title: opts.title as string,
       type: opts.type as string,
+      dir: opts.dir as string | undefined,
       symbols: opts.symbol as string[] | undefined,
-      dependsOn: opts.dependsOn as string[] | undefined,
-      derivesFrom: opts.derivesFrom as string[] | undefined,
     }),
   );
 
 program
   .command('update')
   .description('Update an existing spec (add/remove symbol links, change status)')
-  .requiredOption('--id <id>', 'Spec ID to update')
+  .requiredOption('--id <path>', 'Spec path key to update, e.g. core/spec-parser')
   .option('--add-symbol <ids...>', 'Symbol IDs to add to implements')
   .option('--remove-symbol <ids...>', 'Symbol IDs to remove from implements')
   .option('--status <status>', 'New status value')

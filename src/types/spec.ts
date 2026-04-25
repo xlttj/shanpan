@@ -3,22 +3,26 @@ export interface ImplementsEntry {
   type: string;
 }
 
+export interface GivenWhenThen {
+  given: string;
+  when: string;
+  then: string;
+}
+
 export interface SpecFrontmatter {
-  id: string;
   title: string;
   type: string;
   status: string;
   priority?: string;
   author?: string;
   created?: string | Date;
-  derives_from?: string[];
-  depends_on?: string[];
   defines_rules?: string[];
   implements?: ImplementsEntry[];
-  tags?: string[];
+  acceptance_criteria?: GivenWhenThen[];
 }
 
 export interface ParsedSpec {
+  id: string;
   frontmatter: SpecFrontmatter;
   content: string;
   filePath: string;
@@ -28,8 +32,6 @@ export interface IndexStats {
   specs: number;
   rules: number;
   symbols: number;
-  dependsOn: number;
-  derivesFrom: number;
   defines: number;
   implements: number;
 }

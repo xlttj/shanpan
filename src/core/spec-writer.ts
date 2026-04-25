@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import matter from 'gray-matter';
-import { findSpecFiles, parseSpecFile } from './parser.js';
+import type { GivenWhenThen } from '../types/spec.js';
 
 export const ALLOWED_SPEC_TYPES = [
   'intent',
@@ -12,15 +12,20 @@ export const ALLOWED_SPEC_TYPES = [
 
 export type SpecType = (typeof ALLOWED_SPEC_TYPES)[number];
 
+function slugify(title: string): string {
+  return title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+}
+
 export interface CreateSpecOptions {
-  id: string;
   title: string;
   type: string;
+  /** Subdirectory under specsDir, e.g. 'core', 'cli' */
+  dir?: string;
   /** Symbol IDs to include in the implements list */
   symbols?: string[];
-  dependsOn?: string[];
-  derivesFrom?: string[];
-  /** Directory in which to write the file */
+  /** Acceptance criteria as Given/When/Then entries */
+  acceptanceCriteria?: GivenWhenThen[];
+  /** Base directory where spec files live */
   specsDir: string;
 }
 
@@ -34,7 +39,7 @@ export interface CreateSpecResult {
  * - The file already exists
  */
 export function createSpec(options: CreateSpecOptions): CreateSpecResult {
-  const { id, title, type, symbols, dependsOn, derivesFrom, specsDir } = options;
+  const { title, type, dir, symbols, acceptanceCriteria, specsDir } = options;
 
   if (!ALLOWED_SPEC_TYPES.includes(type as SpecType)) {
     throw new Error(
@@ -42,8 +47,9 @@ export function createSpec(options: CreateSpecOptions): CreateSpecResult {
     );
   }
 
-  const fileName = `${id.toLowerCase()}.md`;
-  const filePath = path.join(specsDir, fileName);
+  const filename = slugify(title) + '.md';
+  const targetDir = dir ? path.join(specsDir, dir) : specsDir;
+  const filePath = path.join(targetDir, filename);
 
   if (fs.existsSync(filePath)) {
     throw new Error(`Spec file already exists: ${filePath}`);
@@ -51,29 +57,24 @@ export function createSpec(options: CreateSpecOptions): CreateSpecResult {
 
   const today = new Date().toISOString().slice(0, 10);
 
-  // Build frontmatter — only include optional arrays if provided
   const frontmatter: Record<string, unknown> = {
-    id,
     title,
     type,
     status: 'draft',
     created: today,
   };
 
-  if (dependsOn && dependsOn.length > 0) {
-    frontmatter['depends_on'] = dependsOn;
-  }
-  if (derivesFrom && derivesFrom.length > 0) {
-    frontmatter['derives_from'] = derivesFrom;
-  }
   if (symbols && symbols.length > 0) {
     frontmatter['implements'] = symbols.map((s) => ({ symbol: s, type: 'unknown' }));
+  }
+  if (acceptanceCriteria && acceptanceCriteria.length > 0) {
+    frontmatter['acceptance_criteria'] = acceptanceCriteria;
   }
 
   const body = `# ${title}\n\n`;
   const content = matter.stringify(body, frontmatter);
 
-  fs.mkdirSync(specsDir, { recursive: true });
+  fs.mkdirSync(targetDir, { recursive: true });
   fs.writeFileSync(filePath, content, 'utf-8');
 
   return { filePath };
@@ -91,43 +92,27 @@ export interface UpdateSpecOptions {
 }
 
 /**
- * Update an existing spec file in place. Finds the file by scanning specsDir
- * for a matching `id` field, then applies the requested mutations while
- * preserving the markdown body exactly.
+ * Update an existing spec file in place. Resolves the file path directly from
+ * the path key (e.g. 'core/spec-parser' → specsDir/core/spec-parser.md).
  *
- * Throws if no spec with the given ID is found.
+ * Throws if the file does not exist.
  */
 export function updateSpec(options: UpdateSpecOptions): { filePath: string } {
   const { id, specsDir, addSymbols, removeSymbols, status } = options;
 
-  // Scan to find the file whose frontmatter.id matches
-  const files = findSpecFiles(specsDir);
-  let targetPath: string | undefined;
-  for (const filePath of files) {
-    try {
-      const parsed = parseSpecFile(filePath);
-      if (parsed.frontmatter.id === id) {
-        targetPath = filePath;
-        break;
-      }
-    } catch {
-      // skip malformed files
-    }
+  const filePath = path.join(specsDir, id.endsWith('.md') ? id : id + '.md');
+
+  if (!fs.existsSync(filePath)) {
+    throw new Error(`Spec not found: ${filePath}`);
   }
 
-  if (!targetPath) {
-    throw new Error(`Spec "${id}" not found in ${specsDir}`);
-  }
-
-  const raw = fs.readFileSync(targetPath, 'utf-8');
+  const raw = fs.readFileSync(filePath, 'utf-8');
   const file = matter(raw);
 
-  // Apply status change
   if (status !== undefined) {
     file.data['status'] = status;
   }
 
-  // Apply symbol additions (dedup by symbol ID)
   if (addSymbols && addSymbols.length > 0) {
     const existing = (file.data['implements'] as Array<{ symbol: string; type: string }>) ?? [];
     const existingIds = new Set(existing.map((e) => e.symbol));
@@ -140,19 +125,17 @@ export function updateSpec(options: UpdateSpecOptions): { filePath: string } {
     file.data['implements'] = existing;
   }
 
-  // Apply symbol removals
   if (removeSymbols && removeSymbols.length > 0) {
     const toRemove = new Set(removeSymbols);
     const existing = (file.data['implements'] as Array<{ symbol: string }>) ?? [];
     file.data['implements'] = existing.filter((e) => !toRemove.has(e.symbol));
-    // Remove the key entirely if empty
     if ((file.data['implements'] as unknown[]).length === 0) {
       delete file.data['implements'];
     }
   }
 
   const updated = matter.stringify(file.content, file.data);
-  fs.writeFileSync(targetPath, updated, 'utf-8');
+  fs.writeFileSync(filePath, updated, 'utf-8');
 
-  return { filePath: targetPath };
+  return { filePath };
 }

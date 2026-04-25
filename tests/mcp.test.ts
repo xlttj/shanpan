@@ -60,32 +60,31 @@ afterEach(() => {
 describe('create_spec tool logic (via spec-writer)', () => {
   it('creates a spec file with the correct structure', () => {
     const { filePath } = createSpec({
-      id: 'MCP-001',
       title: 'MCP test spec',
       type: 'intent',
       specsDir: tmpDir,
     });
     const parsed = parseSpecFile(filePath);
-    expect(parsed.frontmatter.id).toBe('MCP-001');
+    expect(parsed.frontmatter.title).toBe('MCP test spec');
     expect(parsed.frontmatter.type).toBe('intent');
     expect(parsed.frontmatter.status).toBe('draft');
+    expect(filePath).toContain('mcp-test-spec.md');
   });
 
-  it('returns an error message for duplicate IDs (error thrown by spec-writer)', () => {
-    const opts = { id: 'MCP-002', title: 'Dup', type: 'intent', specsDir: tmpDir };
+  it('returns an error message for duplicate titles (error thrown by spec-writer)', () => {
+    const opts = { title: 'Dup', type: 'intent', specsDir: tmpDir };
     createSpec(opts);
     expect(() => createSpec(opts)).toThrow('already exists');
   });
 
   it('returns an error message for invalid type', () => {
     expect(() =>
-      createSpec({ id: 'MCP-003', title: 'Bad', type: 'invalid_type', specsDir: tmpDir }),
+      createSpec({ title: 'Bad', type: 'invalid_type', specsDir: tmpDir }),
     ).toThrow('Invalid spec type');
   });
 
   it('populates implements from symbols list', () => {
     const { filePath } = createSpec({
-      id: 'MCP-004',
       title: 'With symbols',
       type: 'business_rule',
       symbols: ['src/Model/Order.php::Order.setPrice'],
@@ -100,9 +99,9 @@ describe('create_spec tool logic (via spec-writer)', () => {
 
 describe('update_spec tool logic (via updateSpec)', () => {
   it('updates status of an existing spec', () => {
-    createSpec({ id: 'MCP-UPDATE-001', title: 'U1', type: 'intent', specsDir: tmpDir });
+    createSpec({ title: 'U1', type: 'intent', specsDir: tmpDir });
     const { filePath } = updateSpec({
-      id: 'MCP-UPDATE-001',
+      id: 'u1',
       specsDir: tmpDir,
       status: 'active',
     });
@@ -111,13 +110,13 @@ describe('update_spec tool logic (via updateSpec)', () => {
   });
 
   it('adds symbol links to a spec', () => {
-    createSpec({ id: 'MCP-UPDATE-002', title: 'U2', type: 'intent', specsDir: tmpDir });
+    createSpec({ title: 'U2', type: 'intent', specsDir: tmpDir });
     updateSpec({
-      id: 'MCP-UPDATE-002',
+      id: 'u2',
       specsDir: tmpDir,
       addSymbols: [{ symbol: 'src/core/db.ts::openDatabase', type: 'function' }],
     });
-    const parsed = parseSpecFile(path.join(tmpDir, 'mcp-update-002.md'));
+    const parsed = parseSpecFile(path.join(tmpDir, 'u2.md'));
     expect(parsed.frontmatter.implements?.[0]?.symbol).toBe('src/core/db.ts::openDatabase');
   });
 });
@@ -186,7 +185,8 @@ describe('get_unspecced_symbols tool logic', () => {
   it('returns symbols with no IMPLEMENTS edge', async () => {
     // one specced symbol (via indexSpecs), one raw unspecced symbol
     await indexSpecs(conn, [{
-      frontmatter: { id: 'S1', title: 'S1', type: 'intent', status: 'draft', implements: [{ symbol: 'src/a.ts::covered', type: 'function' }] },
+      id: 'S1',
+      frontmatter: { title: 'S1', type: 'intent', status: 'draft', implements: [{ symbol: 'src/a.ts::covered', type: 'function' }] },
       content: '',
       filePath: '/fake/s1.md',
     }]);
@@ -204,7 +204,8 @@ describe('get_unspecced_symbols tool logic', () => {
 
   it('returns empty array when all symbols have IMPLEMENTS edges', async () => {
     await indexSpecs(conn, [{
-      frontmatter: { id: 'S2', title: 'S2', type: 'intent', status: 'draft', implements: [{ symbol: 'src/a.ts::covered', type: 'function' }] },
+      id: 'S2',
+      frontmatter: { title: 'S2', type: 'intent', status: 'draft', implements: [{ symbol: 'src/a.ts::covered', type: 'function' }] },
       content: '',
       filePath: '/fake/s2.md',
     }]);
@@ -237,9 +238,8 @@ describe('get_unspecced_symbols tool logic', () => {
 
 describe('reindex tool logic', () => {
   it('parseAllSpecs + indexSpecs returns correct stats for temp spec files', async () => {
-    createSpec({ id: 'RIDX-001', title: 'Reindex One', type: 'intent', specsDir: tmpDir });
+    createSpec({ title: 'Reindex One', type: 'intent', specsDir: tmpDir });
     createSpec({
-      id: 'RIDX-002',
       title: 'Reindex Two',
       type: 'business_rule',
       symbols: ['src/core/db.ts::openDatabase'],
@@ -498,9 +498,9 @@ describe('handleGetSpecsForSymbolWithContext', () => {
     fs.mkdirSync(path.join(dbDir, '.specgraph'), { recursive: true });
     ({ db, conn } = await openDatabase(dbDir));
     await indexSpecs(conn, [
-      { frontmatter: { id: 'SPEC-M', title: 'Method Spec', type: 'software_requirement', status: 'active' }, content: '', filePath: '' },
-      { frontmatter: { id: 'SPEC-C', title: 'Class Spec', type: 'software_requirement', status: 'active' }, content: '', filePath: '' },
-      { frontmatter: { id: 'SPEC-F', title: 'File Spec', type: 'software_requirement', status: 'active' }, content: '', filePath: '' },
+      { id: 'SPEC-M', frontmatter: { title: 'Method Spec', type: 'software_requirement', status: 'active' }, content: '', filePath: '' },
+      { id: 'SPEC-C', frontmatter: { title: 'Class Spec', type: 'software_requirement', status: 'active' }, content: '', filePath: '' },
+      { id: 'SPEC-F', frontmatter: { title: 'File Spec', type: 'software_requirement', status: 'active' }, content: '', filePath: '' },
     ]);
     // Seed CodeSymbol nodes
     for (const [id, fqn] of [

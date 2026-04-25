@@ -20,13 +20,10 @@ function makeSymbol(id: string): CodeSymbol {
   };
 }
 
-function makeSpec(
-  id: string,
-  symbols: string[] = [],
-): ParsedSpec {
+function makeSpec(id: string, symbols: string[] = []): ParsedSpec {
   return {
+    id,
     frontmatter: {
-      id,
       title: id,
       type: 'software_requirement',
       status: 'draft',

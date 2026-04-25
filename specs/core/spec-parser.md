@@ -1,5 +1,4 @@
 ---
-id: SPEC-002
 title: Spec Parser & Indexer
 type: software_requirement
 status: active
@@ -15,22 +14,19 @@ implements:
     type: function
   - symbol: src/core/indexer.ts::getGraphStats
     type: function
-  - symbol: src/core/validator.ts::validateSpecs
-    type: function
 ---
 # Spec Parser & Indexer
 
 Parses YAML-frontmatter markdown spec files and indexes them into the LadybugDB graph.
 
 `parseSpecFile` reads a single `.md` file, extracts the YAML frontmatter via gray-matter,
-validates required fields (`id`, `title`, `type`, `status`), and returns a `ParsedSpec`.
+validates required fields (`title`, `type`, `status`), and returns a `ParsedSpec`. The
+`id` field on `ParsedSpec` is computed at parse time as the relative file path without
+the `.md` extension (e.g. `core/spec-parser`).
 
 `parseAllSpecs` walks a directory recursively, calls `parseSpecFile` on each `.md` file,
 and collects results and errors without throwing.
 
 `indexSpecs` performs a full drop-and-recreate of the schema, then inserts all Spec nodes,
 BusinessRule stubs (from `defines_rules`), CodeSymbol stubs (from `implements`), and the
-typed edges (DEPENDS_ON, DERIVES_FROM, DEFINES, IMPLEMENTS).
-
-`validateSpecs` checks cross-spec references and detects cycles in the `derives_from` graph
-using DFS.
+typed edges (DEFINES, IMPLEMENTS).

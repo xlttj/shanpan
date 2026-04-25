@@ -7,7 +7,8 @@ export const SCHEMA_STATEMENTS = [
     priority STRING,
     author STRING,
     created DATE,
-    description STRING
+    description STRING,
+    acceptance_criteria STRING
   )`,
   `CREATE NODE TABLE BusinessRule (
     id STRING PRIMARY KEY,
@@ -31,8 +32,6 @@ export const SCHEMA_STATEMENTS = [
     ext  STRING,
     kind STRING
   )`,
-  `CREATE REL TABLE DEPENDS_ON (FROM Spec TO Spec)`,
-  `CREATE REL TABLE DERIVES_FROM (FROM Spec TO Spec)`,
   `CREATE REL TABLE DEFINES (FROM Spec TO BusinessRule)`,
   `CREATE REL TABLE GROUP CONSTRAINS (
     FROM BusinessRule TO Spec,
@@ -64,8 +63,6 @@ export const DROP_ORDER = [
   'CONTAINS',
   'CONSTRAINS',
   'DEFINES',
-  'DERIVES_FROM',
-  'DEPENDS_ON',
   'CodeSymbol',
   'BusinessRule',
   'Spec',

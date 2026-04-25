@@ -1,5 +1,4 @@
 ---
-id: SPEC-004
 title: Language Parsers
 type: software_requirement
 status: active

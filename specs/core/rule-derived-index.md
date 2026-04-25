@@ -1,5 +1,4 @@
 ---
-id: RULE-002
 title: The database is a derived index
 type: business_rule
 status: active

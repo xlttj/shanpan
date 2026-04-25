@@ -1,5 +1,4 @@
 ---
-id: SPEC-007
 title: CLI Commands
 type: software_requirement
 status: active
@@ -31,8 +30,10 @@ The `specgraph` CLI provides the following commands, each implemented as a stand
   for IDE selection and installs agent hooks into the chosen IDE settings file
 - `index` — parses all spec files and rebuilds the Spec/BusinessRule/edge graph
 - `analyze` — walks source directories, extracts symbols, creates IMPLEMENTS edges
-- `create` — authors a new spec markdown file with validated frontmatter
-- `update` — adds/removes symbol links or changes status of an existing spec
+- `create --title <title> --type <type> [--dir <dir>]` — authors a new spec markdown file;
+  filename is derived from the title slug, placed in `specsDir/dir/` when dir is given
+- `update --id <path-key>` — adds/removes symbol links or changes status; id is a path
+  key like `core/spec-parser`
 - `check --staged` — pre-commit hook: reads `git diff --cached`, finds specs affected
   by deleted/renamed files, exits 1 to block the commit if violations found
 - `check --hook-output` — IDE Stop hook mode: outputs hook-compatible JSON

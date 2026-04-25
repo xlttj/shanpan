@@ -15,8 +15,8 @@ afterEach(() => {
   fs.rmSync(tmpDir, { recursive: true, force: true });
 });
 
-function seed(id = 'SPEC-001', extraOpts: object = {}) {
-  return createSpec({ id, title: 'Test Spec', type: 'intent', specsDir: tmpDir, ...extraOpts });
+function seed(title = 'test-spec', extraOpts: object = {}) {
+  return createSpec({ title, type: 'intent', specsDir: tmpDir, ...extraOpts });
 }
 
 describe('updateSpec', () => {
@@ -24,7 +24,7 @@ describe('updateSpec', () => {
     const { filePath } = seed();
     const bodyBefore = parseSpecFile(filePath).content;
 
-    updateSpec({ id: 'SPEC-001', specsDir: tmpDir, status: 'active' });
+    updateSpec({ id: 'test-spec', specsDir: tmpDir, status: 'active' });
 
     const parsed = parseSpecFile(filePath);
     expect(parsed.frontmatter.status).toBe('active');
@@ -34,94 +34,93 @@ describe('updateSpec', () => {
   it('adds a symbol to an empty implements list', () => {
     seed();
     updateSpec({
-      id: 'SPEC-001',
+      id: 'test-spec',
       specsDir: tmpDir,
       addSymbols: [{ symbol: 'src/foo.ts::Foo', type: 'class' }],
     });
-    const parsed = parseSpecFile(path.join(tmpDir, 'spec-001.md'));
+    const parsed = parseSpecFile(path.join(tmpDir, 'test-spec.md'));
     expect(parsed.frontmatter.implements).toHaveLength(1);
     expect(parsed.frontmatter.implements?.[0]?.symbol).toBe('src/foo.ts::Foo');
     expect(parsed.frontmatter.implements?.[0]?.type).toBe('class');
   });
 
   it('appends to an existing implements list', () => {
-    seed('SPEC-002', { symbols: ['src/a.ts::A'] });
+    seed('spec-two', { symbols: ['src/a.ts::A'] });
     updateSpec({
-      id: 'SPEC-002',
+      id: 'spec-two',
       specsDir: tmpDir,
       addSymbols: [{ symbol: 'src/b.ts::B', type: 'function' }],
     });
-    const parsed = parseSpecFile(path.join(tmpDir, 'spec-002.md'));
+    const parsed = parseSpecFile(path.join(tmpDir, 'spec-two.md'));
     expect(parsed.frontmatter.implements).toHaveLength(2);
   });
 
   it('does not duplicate a symbol already in implements', () => {
-    seed('SPEC-003', { symbols: ['src/a.ts::A'] });
+    seed('spec-three', { symbols: ['src/a.ts::A'] });
     updateSpec({
-      id: 'SPEC-003',
+      id: 'spec-three',
       specsDir: tmpDir,
       addSymbols: [{ symbol: 'src/a.ts::A', type: 'class' }],
     });
-    const parsed = parseSpecFile(path.join(tmpDir, 'spec-003.md'));
+    const parsed = parseSpecFile(path.join(tmpDir, 'spec-three.md'));
     expect(parsed.frontmatter.implements).toHaveLength(1);
   });
 
   it('removes a symbol from implements', () => {
-    seed('SPEC-004', { symbols: ['src/a.ts::A', 'src/b.ts::B'] });
-    updateSpec({ id: 'SPEC-004', specsDir: tmpDir, removeSymbols: ['src/a.ts::A'] });
-    const parsed = parseSpecFile(path.join(tmpDir, 'spec-004.md'));
+    seed('spec-four', { symbols: ['src/a.ts::A', 'src/b.ts::B'] });
+    updateSpec({ id: 'spec-four', specsDir: tmpDir, removeSymbols: ['src/a.ts::A'] });
+    const parsed = parseSpecFile(path.join(tmpDir, 'spec-four.md'));
     expect(parsed.frontmatter.implements).toHaveLength(1);
     expect(parsed.frontmatter.implements?.[0]?.symbol).toBe('src/b.ts::B');
   });
 
   it('removing the last symbol clears the implements field', () => {
-    seed('SPEC-005', { symbols: ['src/a.ts::A'] });
-    updateSpec({ id: 'SPEC-005', specsDir: tmpDir, removeSymbols: ['src/a.ts::A'] });
-    const parsed = parseSpecFile(path.join(tmpDir, 'spec-005.md'));
+    seed('spec-five', { symbols: ['src/a.ts::A'] });
+    updateSpec({ id: 'spec-five', specsDir: tmpDir, removeSymbols: ['src/a.ts::A'] });
+    const parsed = parseSpecFile(path.join(tmpDir, 'spec-five.md'));
     expect(parsed.frontmatter.implements).toBeUndefined();
   });
 
   it('removing a non-existent symbol is a no-op', () => {
-    seed('SPEC-006', { symbols: ['src/a.ts::A'] });
+    seed('spec-six', { symbols: ['src/a.ts::A'] });
     expect(() =>
-      updateSpec({ id: 'SPEC-006', specsDir: tmpDir, removeSymbols: ['src/x.ts::X'] }),
+      updateSpec({ id: 'spec-six', specsDir: tmpDir, removeSymbols: ['src/x.ts::X'] }),
     ).not.toThrow();
-    const parsed = parseSpecFile(path.join(tmpDir, 'spec-006.md'));
+    const parsed = parseSpecFile(path.join(tmpDir, 'spec-six.md'));
     expect(parsed.frontmatter.implements).toHaveLength(1);
   });
 
   it('preserves the markdown body verbatim', () => {
     seed();
-    const rawBefore = fs.readFileSync(path.join(tmpDir, 'spec-001.md'), 'utf-8');
+    const rawBefore = fs.readFileSync(path.join(tmpDir, 'test-spec.md'), 'utf-8');
     const bodyBefore = rawBefore.split('---').slice(2).join('---');
 
     updateSpec({
-      id: 'SPEC-001',
+      id: 'test-spec',
       specsDir: tmpDir,
       addSymbols: [{ symbol: 'src/foo.ts::Foo', type: 'class' }],
       status: 'active',
     });
 
-    const rawAfter = fs.readFileSync(path.join(tmpDir, 'spec-001.md'), 'utf-8');
+    const rawAfter = fs.readFileSync(path.join(tmpDir, 'test-spec.md'), 'utf-8');
     const bodyAfter = rawAfter.split('---').slice(2).join('---');
     expect(bodyAfter).toBe(bodyBefore);
   });
 
-  it('throws if spec ID is not found', () => {
+  it('throws if spec path key is not found', () => {
     expect(() =>
-      updateSpec({ id: 'SPEC-NONEXISTENT', specsDir: tmpDir, status: 'active' }),
+      updateSpec({ id: 'nonexistent-spec', specsDir: tmpDir, status: 'active' }),
     ).toThrow('not found');
   });
 
-  it('finds spec by ID regardless of filename convention', () => {
-    // Simulate the existing SPEC-001-project-bootstrap.md naming pattern
-    const longName = path.join(tmpDir, 'SPEC-007-long-name.md');
+  it('resolves spec in a subdirectory by path key', () => {
+    fs.mkdirSync(path.join(tmpDir, 'core'), { recursive: true });
     fs.writeFileSync(
-      longName,
-      '---\nid: SPEC-007\ntitle: Long name\ntype: intent\nstatus: draft\ncreated: 2026-01-01\n---\n# Long name\n\n',
+      path.join(tmpDir, 'core', 'my-spec.md'),
+      '---\ntitle: My Spec\ntype: intent\nstatus: draft\ncreated: 2026-01-01\n---\n# My Spec\n\n',
     );
-    updateSpec({ id: 'SPEC-007', specsDir: tmpDir, status: 'active' });
-    const parsed = parseSpecFile(longName);
+    updateSpec({ id: 'core/my-spec', specsDir: tmpDir, status: 'active' });
+    const parsed = parseSpecFile(path.join(tmpDir, 'core', 'my-spec.md'));
     expect(parsed.frontmatter.status).toBe('active');
   });
 });

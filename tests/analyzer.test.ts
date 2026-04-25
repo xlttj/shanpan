@@ -81,8 +81,8 @@ describe('analyzeAndIndex', () => {
     );
     if (!Array.isArray(r)) r.close();
     const spec: ParsedSpec = {
+      id: 'SPEC-PKG',
       frontmatter: {
-        id: 'SPEC-PKG',
         title: 'Package Spec',
         type: 'software_requirement',
         status: 'active',
@@ -106,8 +106,8 @@ describe('analyzeAndIndex', () => {
     );
     if (!Array.isArray(r)) r.close();
     const spec: ParsedSpec = {
+      id: 'SPEC-MISSING',
       frontmatter: {
-        id: 'SPEC-MISSING',
         title: 'Missing File Spec',
         type: 'software_requirement',
         status: 'active',

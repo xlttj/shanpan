@@ -3,12 +3,11 @@ import fs from 'node:fs';
 import path from 'node:path';
 import type { ParsedSpec, SpecFrontmatter } from '../types/spec.js';
 
-export function parseSpecFile(filePath: string): ParsedSpec {
+export function parseSpecFile(filePath: string, specsDir?: string): ParsedSpec {
   const raw = fs.readFileSync(filePath, 'utf-8');
   const { data, content } = matter(raw);
   const frontmatter = data as SpecFrontmatter;
 
-  if (!frontmatter.id) throw new Error(`Missing required field 'id' in ${filePath}`);
   if (!frontmatter.title) throw new Error(`Missing required field 'title' in ${filePath}`);
   if (!frontmatter.type) throw new Error(`Missing required field 'type' in ${filePath}`);
   if (!frontmatter.status) throw new Error(`Missing required field 'status' in ${filePath}`);
@@ -19,7 +18,8 @@ export function parseSpecFile(filePath: string): ParsedSpec {
     }
   }
 
-  return { frontmatter, content: content.trim(), filePath };
+  const id = specsDir ? path.relative(specsDir, filePath).replace(/\.md$/, '') : '';
+  return { id, frontmatter, content: content.trim(), filePath };
 }
 
 export function findSpecFiles(specsDir: string): string[] {
@@ -43,7 +43,7 @@ export function parseAllSpecs(specsDir: string): { specs: ParsedSpec[]; errors: 
 
   for (const file of files) {
     try {
-      specs.push(parseSpecFile(file));
+      specs.push(parseSpecFile(file, specsDir));
     } catch (err) {
       errors.push(`${path.basename(file)}: ${(err as Error).message}`);
     }

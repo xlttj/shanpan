@@ -269,10 +269,10 @@ export async function runMcp(options: { projectDir?: string } = {}): Promise<voi
       },
       {
         name: 'get_spec',
-        description: 'Get full content (frontmatter + body) of a spec by ID',
+        description: 'Get full content (frontmatter + body) of a spec by path key',
         inputSchema: {
           type: 'object',
-          properties: { id: { type: 'string', description: 'Spec ID, e.g. SPEC-001' } },
+          properties: { id: { type: 'string', description: 'Spec path key, e.g. core/spec-parser' } },
           required: ['id'],
         },
       },
@@ -286,7 +286,7 @@ export async function runMcp(options: { projectDir?: string } = {}): Promise<voi
         description: 'Get code symbols linked to a spec via IMPLEMENTS',
         inputSchema: {
           type: 'object',
-          properties: { id: { type: 'string', description: 'Spec ID' } },
+          properties: { id: { type: 'string', description: 'Spec path key, e.g. core/spec-parser' } },
           required: ['id'],
         },
       },
@@ -325,30 +325,23 @@ export async function runMcp(options: { projectDir?: string } = {}): Promise<voi
         inputSchema: {
           type: 'object',
           properties: {
-            id: { type: 'string', description: 'Spec ID, e.g. RULE-001' },
             title: { type: 'string', description: 'Human-readable title' },
             type: {
               type: 'string',
               enum: [...ALLOWED_SPEC_TYPES],
               description: 'Spec type',
             },
+            dir: {
+              type: 'string',
+              description: 'Subdirectory under specsDir, e.g. core, cli, mcp',
+            },
             symbols: {
               type: 'array',
               items: { type: 'string' },
               description: 'Symbol IDs to link via implements',
             },
-            dependsOn: {
-              type: 'array',
-              items: { type: 'string' },
-              description: 'Spec IDs this spec depends on',
-            },
-            derivesFrom: {
-              type: 'array',
-              items: { type: 'string' },
-              description: 'Spec IDs this spec derives from',
-            },
           },
-          required: ['id', 'title', 'type'],
+          required: ['title', 'type'],
         },
       },
       {
@@ -357,7 +350,7 @@ export async function runMcp(options: { projectDir?: string } = {}): Promise<voi
         inputSchema: {
           type: 'object',
           properties: {
-            id: { type: 'string', description: 'Spec ID to update' },
+            id: { type: 'string', description: 'Spec path key to update, e.g. core/spec-parser' },
             addSymbols: {
               type: 'array',
               items: { type: 'string' },
@@ -499,22 +492,17 @@ export async function runMcp(options: { projectDir?: string } = {}): Promise<voi
       const id = String(a['id'] ?? '');
       const config = loadConfig(projectDir);
       const specsDir = path.resolve(projectDir, config.specsDir);
-      const files = findSpecFiles(specsDir);
-      for (const filePath of files) {
-        try {
-          const parsed = parseSpecFile(filePath);
-          if (parsed.frontmatter.id === id) {
-            return jsonResult({
-              frontmatter: parsed.frontmatter,
-              content: parsed.content,
-              filePath: path.relative(projectDir, parsed.filePath),
-            });
-          }
-        } catch {
-          // skip malformed files
-        }
+      const filePath = path.join(specsDir, id.endsWith('.md') ? id : id + '.md');
+      try {
+        const parsed = parseSpecFile(filePath, specsDir);
+        return jsonResult({
+          frontmatter: parsed.frontmatter,
+          content: parsed.content,
+          filePath: path.relative(projectDir, parsed.filePath),
+        });
+      } catch {
+        return textResult(`Spec "${id}" not found.`);
       }
-      return textResult(`Spec "${id}" not found.`);
     }
 
     if (name === 'list_rules') {
@@ -597,10 +585,10 @@ export async function runMcp(options: { projectDir?: string } = {}): Promise<voi
         const drift: UnresolvedImplementation[] = [];
         for (const filePath of files) {
           try {
-            const parsed = parseSpecFile(filePath);
+            const parsed = parseSpecFile(filePath, specsDir);
             for (const impl of parsed.frontmatter.implements ?? []) {
               if (!knownIds.has(impl.symbol)) {
-                drift.push({ specId: parsed.frontmatter.id, symbolId: impl.symbol });
+                drift.push({ specId: parsed.id, symbolId: impl.symbol });
               }
             }
           } catch {
@@ -645,14 +633,10 @@ export async function runMcp(options: { projectDir?: string } = {}): Promise<voi
       const specsDir = path.resolve(projectDir, config.specsDir);
       try {
         const { filePath } = createSpec({
-          id: String(a['id'] ?? ''),
           title: String(a['title'] ?? ''),
           type: String(a['type'] ?? ''),
+          dir: typeof a['dir'] === 'string' ? a['dir'] : undefined,
           symbols: Array.isArray(a['symbols']) ? (a['symbols'] as string[]) : undefined,
-          dependsOn: Array.isArray(a['dependsOn']) ? (a['dependsOn'] as string[]) : undefined,
-          derivesFrom: Array.isArray(a['derivesFrom'])
-            ? (a['derivesFrom'] as string[])
-            : undefined,
           specsDir,
         });
         return textResult(`Created ${path.relative(projectDir, filePath)}`);

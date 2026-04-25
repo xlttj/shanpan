@@ -1,5 +1,4 @@
 ---
-id: SPEC-003
 title: Code Analyzer
 type: software_requirement
 status: active

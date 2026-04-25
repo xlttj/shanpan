@@ -1,5 +1,4 @@
 ---
-id: SPEC-013
 title: IDE Agent Hook Installation
 type: software_requirement
 status: active

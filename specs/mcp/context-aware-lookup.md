@@ -1,13 +1,8 @@
 ---
-id: SPEC-011
 title: File nodes, containment hierarchy, and context-aware spec lookup
 type: software_requirement
 status: active
 created: '2026-04-19'
-depends_on:
-  - SPEC-003
-  - SPEC-005
-  - SPEC-008
 implements:
   - symbol: src/analyzer/indexer.ts::analyzeAndIndex
     type: function
