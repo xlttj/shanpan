@@ -15,7 +15,7 @@ npm install -g specgraph
 ## Project setup
 
 ```bash
-specgraph init      # create .specgraph/ in your project root
+specgraph init      # create .specgraph/, install agent hooks into your IDE settings
 specgraph index     # parse spec Markdown files into the graph
 specgraph analyze   # scan source code and link symbols to specs
 ```
