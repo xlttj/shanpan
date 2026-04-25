@@ -6,6 +6,8 @@ created: '2026-04-05'
 implements:
   - symbol: src/analyzer/indexer.ts::analyzeAndIndex
     type: function
+  - symbol: src/analyzer/indexer.ts::analyzeAndIndexIncremental
+    type: function
   - symbol: src/analyzer/walker.ts::walkFiles
     type: function
   - symbol: src/analyzer/resolver.ts::resolveImplementations
@@ -27,10 +29,15 @@ declared in spec frontmatter. Only symbols that exist in the extracted set produ
 `findUnresolvedImplementations` returns the complement: spec `implements` entries whose
 symbol ID was not found in the extracted set. These are drift warnings.
 
-`analyzeAndIndex` orchestrates the full pipeline: walk → parse per language → upsert
-CodeSymbol nodes → upsert File nodes → create CONTAINS edges (File→CodeSymbol for
-top-level symbols, CodeSymbol→CodeSymbol for methods within a class) → resolve
-implementations → create IMPLEMENTS edges → collect drift warnings. Spec `implements`
-entries with `type: file` are handled directly: the file is upserted as a File node and
-an IMPLEMENTS edge is created if the file exists, or a drift warning is recorded if it
-does not.
+`analyzeAndIndex` orchestrates the full pipeline: walk → parse → write. Parsing runs in
+parallel across a worker-thread pool (up to 8 workers, `SPECGRAPH_WORKERS=0` disables).
+DB writes use UNWIND batches of 200 rows instead of per-item queries. The full rebuild
+clears all CodeSymbol and File nodes before reinserting. Spec `implements` entries with
+`type: file` create File→Spec IMPLEMENTS edges; missing files are recorded as drift.
+
+`analyzeAndIndexIncremental` handles the common case where only a subset of files changed.
+It receives the sets of changed and deleted relative paths (determined by mtime comparison
+in the CLI layer), deletes only those files' nodes, re-parses changed files, reinserts
+their nodes and edges, and re-resolves IMPLEMENTS and drift against the full current DB
+symbol set. Cross-file CALLS edges are resolved by querying existing symbols from the DB
+after inserting the new ones.

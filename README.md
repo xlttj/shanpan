@@ -15,9 +15,10 @@ npm install -g specgraph
 ## Project setup
 
 ```bash
-specgraph init      # create .specgraph/, install agent hooks into your IDE settings
-specgraph index     # parse spec Markdown files into the graph
-specgraph analyze   # scan source code and link symbols to specs
+specgraph init           # create .specgraph/, install agent hooks into your IDE settings
+specgraph index          # parse spec Markdown files into the graph
+specgraph analyze        # scan source code and link symbols to specs (incremental)
+specgraph analyze --full # force a complete rebuild, ignoring cached state
 ```
 
 ## MCP configuration

@@ -29,7 +29,9 @@ The `specgraph` CLI provides the following commands, each implemented as a stand
 - `init` — creates `.specgraph/` with an empty graph DB and writes `config.json`; prompts
   for IDE selection and installs agent hooks into the chosen IDE settings file
 - `index` — parses all spec files and rebuilds the Spec/BusinessRule/edge graph
-- `analyze` — walks source directories, extracts symbols, creates IMPLEMENTS edges
+- `analyze` — walks source directories, extracts symbols, creates IMPLEMENTS edges;
+  skips unchanged files using mtime state (incremental by default); `--full` forces a
+  complete rebuild and resets the state file; `--watch` re-runs on file changes
 - `create --title <title> --type <type> [--dir <dir>]` — authors a new spec markdown file;
   filename is derived from the title slug, placed in `specsDir/dir/` when dir is given
 - `update --id <path-key>` — adds/removes symbol links or changes status; id is a path
