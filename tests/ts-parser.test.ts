@@ -46,6 +46,27 @@ describe('TypeScriptParser', () => {
     expect(symbols.some((s) => s.fqn === 'Status' && s.kind === 'enum')).toBe(true);
   });
 
+  it('extracts exported const arrays as constant', () => {
+    const src = `export const SKILLS: Skill[] = [a, b];`;
+    const symbols = parser.extractSymbols('src/skills/index.ts', src);
+    const sym = symbols.find((s) => s.fqn === 'SKILLS');
+    expect(sym).toBeDefined();
+    expect(sym?.kind).toBe('constant');
+    expect(sym?.id).toBe('src/skills/index.ts::SKILLS');
+  });
+
+  it('extracts non-exported const as constant', () => {
+    const src = `const MAX_RETRIES = 3;`;
+    const symbols = parser.extractSymbols('src/config.ts', src);
+    expect(symbols.some((s) => s.fqn === 'MAX_RETRIES' && s.kind === 'constant')).toBe(true);
+  });
+
+  it('extracts let declarations as constant', () => {
+    const src = `export let counter = 0;`;
+    const symbols = parser.extractSymbols('src/state.ts', src);
+    expect(symbols.some((s) => s.fqn === 'counter' && s.kind === 'constant')).toBe(true);
+  });
+
   it('sets correct id, filePath, language', () => {
     const symbols = parser.extractSymbols('src/foo.ts', 'export class Baz {}');
     const cls = symbols.find((s) => s.fqn === 'Baz');
@@ -72,6 +93,7 @@ describe('TypeScriptParser', () => {
     expect(fqns).toContain('IUserRepository');
     expect(fqns).toContain('UserId');
     expect(fqns).toContain('UserRole');
+    expect(fqns).toContain('DEFAULT_ROLES');
   });
 });
 

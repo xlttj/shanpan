@@ -22,3 +22,5 @@ export enum UserRole {
   Admin = 'admin',
   User = 'user',
 }
+
+export const DEFAULT_ROLES: UserRole[] = [UserRole.Admin, UserRole.User];

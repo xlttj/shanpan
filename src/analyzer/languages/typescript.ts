@@ -96,6 +96,29 @@ function walkNode(
     return;
   }
 
+  // const/let declarations → constant symbols
+  if (node.type === 'lexical_declaration' || node.type === 'variable_declaration') {
+    for (const child of node.children) {
+      if (child.type === 'variable_declarator') {
+        const nameNode = child.childForFieldName('name');
+        if (nameNode && nameNode.type === 'identifier') {
+          const name = nameNode.text;
+          const fqn = parentFqn ? `${parentFqn}.${name}` : name;
+          results.push({
+            id: `${filePath}::${fqn}`,
+            fqn,
+            kind: 'constant',
+            filePath,
+            lineStart: node.startPosition.row + 1,
+            lineEnd: node.endPosition.row + 1,
+            language,
+          });
+        }
+      }
+    }
+    return;
+  }
+
   // Recurse into top-level containers
   if (node.type === 'program' || node.type === 'statement_block') {
     for (const child of node.children) {
