@@ -16,6 +16,14 @@ function slugify(title: string): string {
   return title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
 }
 
+function validateRefs(refs: string[]): void {
+  for (const url of refs) {
+    if (!/^https?:\/\//.test(url)) {
+      throw new Error(`Invalid ref "${url}": must be a full URL starting with http:// or https://`);
+    }
+  }
+}
+
 export interface CreateSpecOptions {
   title: string;
   type: string;
@@ -25,6 +33,8 @@ export interface CreateSpecOptions {
   symbols?: string[];
   /** Acceptance criteria as Given/When/Then entries */
   acceptanceCriteria?: GivenWhenThen[];
+  /** External URLs to attach as context references */
+  refs?: string[];
   /** Base directory where spec files live */
   specsDir: string;
 }
@@ -39,7 +49,7 @@ export interface CreateSpecResult {
  * - The file already exists
  */
 export function createSpec(options: CreateSpecOptions): CreateSpecResult {
-  const { title, type, dir, symbols, acceptanceCriteria, specsDir } = options;
+  const { title, type, dir, symbols, acceptanceCriteria, refs, specsDir } = options;
 
   if (!ALLOWED_SPEC_TYPES.includes(type as SpecType)) {
     throw new Error(
@@ -70,6 +80,10 @@ export function createSpec(options: CreateSpecOptions): CreateSpecResult {
   if (acceptanceCriteria && acceptanceCriteria.length > 0) {
     frontmatter['acceptance_criteria'] = acceptanceCriteria;
   }
+  if (refs && refs.length > 0) {
+    validateRefs(refs);
+    frontmatter['refs'] = refs;
+  }
 
   const body = `# ${title}\n\n`;
   const content = matter.stringify(body, frontmatter);
@@ -87,6 +101,10 @@ export interface UpdateSpecOptions {
   addSymbols?: Array<{ symbol: string; type: string }>;
   /** Symbol IDs to remove from implements */
   removeSymbols?: string[];
+  /** External URLs to append to refs (no duplicates, must be http/https) */
+  addRefs?: string[];
+  /** URLs to remove from refs */
+  removeRefs?: string[];
   /** Overwrite the status field */
   status?: string;
 }
@@ -98,7 +116,7 @@ export interface UpdateSpecOptions {
  * Throws if the file does not exist.
  */
 export function updateSpec(options: UpdateSpecOptions): { filePath: string } {
-  const { id, specsDir, addSymbols, removeSymbols, status } = options;
+  const { id, specsDir, addSymbols, removeSymbols, addRefs, removeRefs, status } = options;
 
   const filePath = path.join(specsDir, id.endsWith('.md') ? id : id + '.md');
 
@@ -131,6 +149,28 @@ export function updateSpec(options: UpdateSpecOptions): { filePath: string } {
     file.data['implements'] = existing.filter((e) => !toRemove.has(e.symbol));
     if ((file.data['implements'] as unknown[]).length === 0) {
       delete file.data['implements'];
+    }
+  }
+
+  if (addRefs && addRefs.length > 0) {
+    validateRefs(addRefs);
+    const existing = (file.data['refs'] as string[]) ?? [];
+    const existingSet = new Set(existing);
+    for (const url of addRefs) {
+      if (!existingSet.has(url)) {
+        existing.push(url);
+        existingSet.add(url);
+      }
+    }
+    file.data['refs'] = existing;
+  }
+
+  if (removeRefs && removeRefs.length > 0) {
+    const toRemove = new Set(removeRefs);
+    const existing = (file.data['refs'] as string[]) ?? [];
+    file.data['refs'] = existing.filter((u) => !toRemove.has(u));
+    if ((file.data['refs'] as unknown[]).length === 0) {
+      delete file.data['refs'];
     }
   }
 

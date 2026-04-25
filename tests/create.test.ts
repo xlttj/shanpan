@@ -106,4 +106,35 @@ describe('createSpec', () => {
     expect(filePath).toBe(path.join(tmpDir, 'core', 'sub-spec.md'));
     expect(fs.existsSync(filePath)).toBe(true);
   });
+
+  it('populates refs when URLs are provided', () => {
+    const { filePath } = createSpec({
+      title: 'With refs',
+      type: 'intent',
+      refs: ['https://example.com/rfc', 'http://docs.example.com/api'],
+      specsDir: tmpDir,
+    });
+    const parsed = parseSpecFile(filePath);
+    expect(parsed.frontmatter.refs).toEqual([
+      'https://example.com/rfc',
+      'http://docs.example.com/api',
+    ]);
+  });
+
+  it('omits refs when none are provided', () => {
+    const { filePath } = createSpec({ title: 'No refs', type: 'intent', specsDir: tmpDir });
+    const parsed = parseSpecFile(filePath);
+    expect(parsed.frontmatter.refs).toBeUndefined();
+  });
+
+  it('throws when a ref is not a valid http/https URL', () => {
+    expect(() =>
+      createSpec({
+        title: 'Bad ref',
+        type: 'intent',
+        refs: ['docs/design.md'],
+        specsDir: tmpDir,
+      }),
+    ).toThrow('Invalid ref');
+  });
 });

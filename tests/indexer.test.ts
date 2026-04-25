@@ -91,6 +91,41 @@ describe('indexSpecs', () => {
     expect(rows[0]?.['to']).toBe('BR-001');
   });
 
+  it('inserts Ref nodes and REFERENCES edges from refs', async () => {
+    const specs = [
+      makeSpec('spec-001', {
+        refs: ['https://example.com/rfc1', 'https://example.com/rfc2'],
+      }),
+    ];
+    const stats = await indexSpecs(conn, specs);
+
+    expect(stats.refs).toBe(2);
+    expect(stats.references).toBe(2);
+
+    const { rows } = await queryAll(
+      conn,
+      `MATCH (s:Spec)-[:REFERENCES]->(r:Ref) RETURN s.id AS specId, r.id AS url`,
+    );
+    expect(rows).toHaveLength(2);
+    const urls = rows.map((r) => r['url']).sort();
+    expect(urls).toEqual(['https://example.com/rfc1', 'https://example.com/rfc2']);
+  });
+
+  it('deduplicates Ref nodes shared across specs', async () => {
+    const sharedUrl = 'https://example.com/shared';
+    const specs = [
+      makeSpec('spec-a', { refs: [sharedUrl] }),
+      makeSpec('spec-b', { refs: [sharedUrl] }),
+    ];
+    const stats = await indexSpecs(conn, specs);
+
+    expect(stats.refs).toBe(1);
+    expect(stats.references).toBe(2);
+
+    const { rows } = await queryAll(conn, `MATCH (r:Ref) RETURN r.id AS url`);
+    expect(rows).toHaveLength(1);
+  });
+
   it('clears previous data on re-index', async () => {
     const specs1 = [makeSpec('spec-001')];
     await indexSpecs(conn, specs1);
@@ -110,6 +145,7 @@ describe('getGraphStats', () => {
     expect(stats.specs).toBe(0);
     expect(stats.rules).toBe(0);
     expect(stats.symbols).toBe(0);
+    expect(stats.refs).toBe(0);
   });
 
   it('returns correct counts after indexing', async () => {
@@ -126,7 +162,9 @@ describe('getGraphStats', () => {
     expect(stats.specs).toBe(2);
     expect(stats.rules).toBe(1);
     expect(stats.symbols).toBe(1);
+    expect(stats.refs).toBe(0);
     expect(stats.edges['DEFINES']).toBe(1);
     expect(stats.edges['IMPLEMENTS']).toBe(1);
+    expect(stats.edges['REFERENCES']).toBe(0);
   });
 });

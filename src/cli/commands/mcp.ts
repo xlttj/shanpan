@@ -340,6 +340,11 @@ export async function runMcp(options: { projectDir?: string } = {}): Promise<voi
               items: { type: 'string' },
               description: 'Symbol IDs to link via implements',
             },
+            refs: {
+              type: 'array',
+              items: { type: 'string' },
+              description: 'External URLs (http/https) to attach as context references',
+            },
           },
           required: ['title', 'type'],
         },
@@ -360,6 +365,16 @@ export async function runMcp(options: { projectDir?: string } = {}): Promise<voi
               type: 'array',
               items: { type: 'string' },
               description: 'Symbol IDs to remove from implements',
+            },
+            addRefs: {
+              type: 'array',
+              items: { type: 'string' },
+              description: 'URLs to add to refs',
+            },
+            removeRefs: {
+              type: 'array',
+              items: { type: 'string' },
+              description: 'URLs to remove from refs',
             },
             status: { type: 'string', description: 'New status value' },
           },
@@ -447,6 +462,17 @@ export async function runMcp(options: { projectDir?: string } = {}): Promise<voi
             },
           },
           required: ['query'],
+        },
+      },
+      {
+        name: 'get_specs_by_ref',
+        description: 'List specs that reference a given external URL via their refs field',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            url: { type: 'string', description: 'Exact URL to look up' },
+          },
+          required: ['url'],
         },
       },
       {
@@ -637,6 +663,7 @@ export async function runMcp(options: { projectDir?: string } = {}): Promise<voi
           type: String(a['type'] ?? ''),
           dir: typeof a['dir'] === 'string' ? a['dir'] : undefined,
           symbols: Array.isArray(a['symbols']) ? (a['symbols'] as string[]) : undefined,
+          refs: Array.isArray(a['refs']) ? (a['refs'] as string[]) : undefined,
           specsDir,
         });
         return textResult(`Created ${path.relative(projectDir, filePath)}`);
@@ -658,6 +685,8 @@ export async function runMcp(options: { projectDir?: string } = {}): Promise<voi
           removeSymbols: Array.isArray(a['removeSymbols'])
             ? (a['removeSymbols'] as string[])
             : undefined,
+          addRefs: Array.isArray(a['addRefs']) ? (a['addRefs'] as string[]) : undefined,
+          removeRefs: Array.isArray(a['removeRefs']) ? (a['removeRefs'] as string[]) : undefined,
           status: a['status'] !== undefined ? String(a['status']) : undefined,
         });
         return textResult(`Updated ${path.relative(projectDir, filePath)}`);
@@ -693,7 +722,7 @@ export async function runMcp(options: { projectDir?: string } = {}): Promise<voi
       try {
         const stats = await indexSpecs(conn, specs);
         const lines = [
-          `✓ Reindexed: ${stats.specs} specs, ${stats.symbols} symbols, ${stats.implements} IMPLEMENTS edges`,
+          `✓ Reindexed: ${stats.specs} specs, ${stats.symbols} symbols, ${stats.refs} refs, ${stats.implements} IMPLEMENTS edges, ${stats.references} REFERENCES edges`,
         ];
         if (errors.length > 0) lines.push(`Warnings: ${errors.join('; ')}`);
         return textResult(lines.join('\n'));
@@ -719,6 +748,21 @@ export async function runMcp(options: { projectDir?: string } = {}): Promise<voi
       const limit = typeof a['limit'] === 'number' ? (a['limit'] as number) : 20;
       const kind = typeof a['kind'] === 'string' ? (a['kind'] as string) : undefined;
       return handleSearchSymbols(projectDir, String(a['query'] ?? ''), limit, kind);
+    }
+
+    if (name === 'get_specs_by_ref') {
+      const url = String(a['url'] ?? '');
+      const { db, conn } = await openDatabase(projectDir, true);
+      try {
+        const { rows } = await queryAll(
+          conn,
+          `MATCH (s:Spec)-[:REFERENCES]->(r:Ref {id: '${escId(url)}'})
+           RETURN s.id AS id, s.title AS title, s.type AS type, s.status AS status ORDER BY s.id`,
+        );
+        return jsonResult(rows);
+      } finally {
+        await closeDatabase(db, conn);
+      }
     }
 
     if (name === 'get_specs_for_symbol_with_context') {

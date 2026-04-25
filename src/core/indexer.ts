@@ -26,8 +26,10 @@ export async function indexSpecs(
     specs: 0,
     rules: 0,
     symbols: 0,
+    refs: 0,
     defines: 0,
     implements: 0,
+    references: 0,
   };
 
   // Insert Spec nodes
@@ -94,6 +96,30 @@ export async function indexSpecs(
     }
   }
 
+  // Insert Ref nodes from refs (deduped across all specs)
+  const refUrls = new Set<string>();
+  for (const { frontmatter: f } of specs) {
+    for (const url of f.refs ?? []) {
+      if (!refUrls.has(url)) {
+        refUrls.add(url);
+        const result = await conn.query(`CREATE (:Ref { id: ${esc(url)} })`);
+        if (!Array.isArray(result)) result.close();
+        stats.refs++;
+      }
+    }
+  }
+
+  // Insert REFERENCES edges (Spec -> Ref)
+  for (const { id, frontmatter: f } of specs) {
+    for (const url of f.refs ?? []) {
+      const cypher = `MATCH (s:Spec {id: ${esc(id)}}), (r:Ref {id: ${esc(url)}})
+        CREATE (s)-[:REFERENCES]->(r)`;
+      const result = await conn.query(cypher);
+      if (!Array.isArray(result)) result.close();
+      stats.references++;
+    }
+  }
+
   // Insert DEFINES edges (Spec -> BusinessRule)
   for (const { id, frontmatter: f } of specs) {
     for (const ruleId of f.defines_rules ?? []) {
@@ -147,28 +173,32 @@ export async function getGraphStats(conn: Connection): Promise<{
     }
   };
 
-  const [specs, rules, symbols] = await Promise.all([
+  const [specs, rules, symbols, refs] = await Promise.all([
     countNode('Spec'),
     countNode('BusinessRule'),
     countNode('CodeSymbol'),
+    countNode('Ref'),
   ]);
 
-  const [defines, constrains, implements_, calls] = await Promise.all([
+  const [defines, constrains, implements_, calls, references] = await Promise.all([
     countRel('DEFINES'),
     countRel('CONSTRAINS'),
     countRel('IMPLEMENTS'),
     countRel('CALLS'),
+    countRel('REFERENCES'),
   ]);
 
   return {
     specs,
     rules,
     symbols,
+    refs,
     edges: {
       DEFINES: defines,
       CONSTRAINS: constrains,
       IMPLEMENTS: implements_,
       CALLS: calls,
+      REFERENCES: references,
     },
   };
 }

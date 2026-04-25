@@ -19,6 +19,7 @@ export interface SpecFrontmatter {
   defines_rules?: string[];
   implements?: ImplementsEntry[];
   acceptance_criteria?: GivenWhenThen[];
+  refs?: string[];
 }
 
 export interface ParsedSpec {
@@ -32,6 +33,8 @@ export interface IndexStats {
   specs: number;
   rules: number;
   symbols: number;
+  refs: number;
   defines: number;
   implements: number;
+  references: number;
 }

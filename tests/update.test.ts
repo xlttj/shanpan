@@ -113,6 +113,45 @@ describe('updateSpec', () => {
     ).toThrow('not found');
   });
 
+  it('adds a URL to refs', () => {
+    seed('ref-add');
+    updateSpec({ id: 'ref-add', specsDir: tmpDir, addRefs: ['https://example.com/rfc1'] });
+    const parsed = parseSpecFile(path.join(tmpDir, 'ref-add.md'));
+    expect(parsed.frontmatter.refs).toEqual(['https://example.com/rfc1']);
+  });
+
+  it('appends to an existing refs list without duplicates', () => {
+    seed('ref-dedup', { refs: ['https://example.com/a'] });
+    updateSpec({
+      id: 'ref-dedup',
+      specsDir: tmpDir,
+      addRefs: ['https://example.com/a', 'https://example.com/b'],
+    });
+    const parsed = parseSpecFile(path.join(tmpDir, 'ref-dedup.md'));
+    expect(parsed.frontmatter.refs).toEqual(['https://example.com/a', 'https://example.com/b']);
+  });
+
+  it('removes a URL from refs', () => {
+    seed('ref-remove', { refs: ['https://example.com/a', 'https://example.com/b'] });
+    updateSpec({ id: 'ref-remove', specsDir: tmpDir, removeRefs: ['https://example.com/a'] });
+    const parsed = parseSpecFile(path.join(tmpDir, 'ref-remove.md'));
+    expect(parsed.frontmatter.refs).toEqual(['https://example.com/b']);
+  });
+
+  it('removing the last ref clears the refs field', () => {
+    seed('ref-clear', { refs: ['https://example.com/a'] });
+    updateSpec({ id: 'ref-clear', specsDir: tmpDir, removeRefs: ['https://example.com/a'] });
+    const parsed = parseSpecFile(path.join(tmpDir, 'ref-clear.md'));
+    expect(parsed.frontmatter.refs).toBeUndefined();
+  });
+
+  it('throws when addRefs contains a non-http URL', () => {
+    seed('ref-invalid');
+    expect(() =>
+      updateSpec({ id: 'ref-invalid', specsDir: tmpDir, addRefs: ['file:///etc/passwd'] }),
+    ).toThrow('Invalid ref');
+  });
+
   it('resolves spec in a subdirectory by path key', () => {
     fs.mkdirSync(path.join(tmpDir, 'core'), { recursive: true });
     fs.writeFileSync(

@@ -67,12 +67,14 @@ program
   .requiredOption('--type <type>', 'intent | business_rule | software_requirement | project_spec')
   .option('--dir <dir>', 'Subdirectory under specsDir, e.g. core, cli')
   .option('--symbol <ids...>', 'Symbol IDs to link via implements')
+  .option('--ref <urls...>', 'External URLs to attach as refs (http/https)')
   .action((opts) =>
     runCreate({
       title: opts.title as string,
       type: opts.type as string,
       dir: opts.dir as string | undefined,
       symbols: opts.symbol as string[] | undefined,
+      refs: opts.ref as string[] | undefined,
     }),
   );
 
@@ -82,12 +84,16 @@ program
   .requiredOption('--id <path>', 'Spec path key to update, e.g. core/spec-parser')
   .option('--add-symbol <ids...>', 'Symbol IDs to add to implements')
   .option('--remove-symbol <ids...>', 'Symbol IDs to remove from implements')
+  .option('--add-ref <urls...>', 'URLs to add to refs')
+  .option('--remove-ref <urls...>', 'URLs to remove from refs')
   .option('--status <status>', 'New status value')
   .action((opts) =>
     runUpdate({
       id: opts.id as string,
       addSymbols: opts.addSymbol as string[] | undefined,
       removeSymbols: opts.removeSymbol as string[] | undefined,
+      addRefs: opts.addRef as string[] | undefined,
+      removeRefs: opts.removeRef as string[] | undefined,
       status: opts.status as string | undefined,
     }),
   );

@@ -9,6 +9,7 @@ export async function runCreate(options: {
   type: string;
   dir?: string;
   symbols?: string[];
+  refs?: string[];
 }): Promise<void> {
   const projectDir = process.cwd();
   const config = loadConfig(projectDir);
@@ -48,6 +49,7 @@ export async function runCreate(options: {
       type: options.type,
       dir: options.dir,
       symbols: options.symbols,
+      refs: options.refs,
       specsDir,
     });
 

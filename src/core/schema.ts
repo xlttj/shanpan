@@ -32,6 +32,10 @@ export const SCHEMA_STATEMENTS = [
     ext  STRING,
     kind STRING
   )`,
+  `CREATE NODE TABLE Ref (
+    id STRING PRIMARY KEY
+  )`,
+  `CREATE REL TABLE REFERENCES (FROM Spec TO Ref)`,
   `CREATE REL TABLE DEFINES (FROM Spec TO BusinessRule)`,
   `CREATE REL TABLE GROUP CONSTRAINS (
     FROM BusinessRule TO Spec,
@@ -63,8 +67,10 @@ export const DROP_ORDER = [
   'CONTAINS',
   'CONSTRAINS',
   'DEFINES',
+  'REFERENCES',
   'CodeSymbol',
   'BusinessRule',
+  'Ref',
   'Spec',
   'File',
 ];

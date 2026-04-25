@@ -8,6 +8,8 @@ export async function runUpdate(options: {
   id: string;
   addSymbols?: string[];
   removeSymbols?: string[];
+  addRefs?: string[];
+  removeRefs?: string[];
   status?: string;
 }): Promise<void> {
   const projectDir = process.cwd();
@@ -48,6 +50,8 @@ export async function runUpdate(options: {
       specsDir,
       addSymbols: resolvedAddSymbols.length > 0 ? resolvedAddSymbols : undefined,
       removeSymbols: options.removeSymbols,
+      addRefs: options.addRefs,
+      removeRefs: options.removeRefs,
       status: options.status,
     });
 
