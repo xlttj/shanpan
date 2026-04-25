@@ -4,6 +4,26 @@ import path from 'node:path';
 import { openDatabase, closeDatabase, ensureSchema, getDbPath, DB_DIR } from '../../core/db.js';
 import { saveConfig } from '../../core/config.js';
 import { DEFAULT_CONFIG } from '../../types/config.js';
+import { SKILLS } from '../../skills/index.js';
+
+const SKILL_CLIENT_DIRS = ['.claude', '.cursor'] as const;
+
+function writeSkills(projectDir: string): string[] {
+  const written: string[] = [];
+  for (const clientDir of SKILL_CLIENT_DIRS) {
+    const clientPath = path.join(projectDir, clientDir);
+    // Always write to .claude/; only write to others if the client dir already exists
+    if (clientDir !== '.claude' && !fs.existsSync(clientPath)) continue;
+    const skillsBase = path.join(clientPath, 'skills');
+    for (const skill of SKILLS) {
+      const skillDir = path.join(skillsBase, skill.name);
+      fs.mkdirSync(skillDir, { recursive: true });
+      fs.writeFileSync(path.join(skillDir, 'SKILL.md'), skill.content, 'utf-8');
+    }
+    written.push(path.join(clientDir, 'skills'));
+  }
+  return written;
+}
 
 export async function runInit(options: { specsDir?: string }): Promise<void> {
   const projectDir = process.cwd();
@@ -31,9 +51,14 @@ export async function runInit(options: { specsDir?: string }): Promise<void> {
   config.specsDir = path.relative(projectDir, specsDir);
   saveConfig(projectDir, config);
 
+  const skillDirs = writeSkills(projectDir);
+
   console.log(chalk.green(`✓ Created ${DB_DIR}/ with empty graph database`));
   console.log(chalk.green(`✓ Created ${DB_DIR}/config.json with default settings`));
   console.log(chalk.green(`✓ Specs directory ready at ${path.relative(projectDir, specsDir)}/`));
+  for (const dir of skillDirs) {
+    console.log(chalk.green(`✓ Wrote agent skills to ${dir}/`));
+  }
   console.log('');
   console.log(chalk.gray('Next steps:'));
   console.log(chalk.gray('  1. Add spec files (*.md) to the specs/ directory'));
