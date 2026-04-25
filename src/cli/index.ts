@@ -51,12 +51,14 @@ program
   .option('--exclude <dirs...>', 'Directory names to skip (overrides config)')
   .option('--languages <langs...>', 'Languages to parse: typescript, php (overrides config)')
   .option('--watch', 'Keep running and re-analyze on file changes (2s debounce)')
+  .option('--full', 'Force a full rebuild, ignoring the incremental state cache')
   .action((opts) =>
     runAnalyze({
       include: opts.include as string[] | undefined,
       exclude: opts.exclude as string[] | undefined,
       languages: opts.languages as string[] | undefined,
       watch: !!opts.watch,
+      full: !!opts.full,
     }),
   );
 

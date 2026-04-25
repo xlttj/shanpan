@@ -1,5 +1,8 @@
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
+import { Worker } from 'node:worker_threads';
+import { fileURLToPath } from 'node:url';
 import type { Connection } from '@ladybugdb/core';
 import type { SpecGraphConfig } from '../types/config.js';
 import type { CodeSymbol, CallRef } from '../types/code.js';
@@ -8,6 +11,8 @@ import { walkFiles } from './walker.js';
 import { getParserForExtension, getExtensionsForLanguages } from './languages/index.js';
 import { resolveImplementations, findUnresolvedImplementations, suggestRenames } from './resolver.js';
 import type { RenameSuggestion } from './resolver.js';
+import { queryAll } from '../core/db.js';
+import type { ParseTask, ParseResult } from './parse-worker.js';
 
 export interface AnalysisStats {
   filesScanned: number;
@@ -22,63 +27,23 @@ export interface AnalysisStats {
   renameSuggestions: RenameSuggestion[];
 }
 
+const BATCH_SIZE = 200;
+
 function esc(value: string | null | undefined): string {
   if (value == null) return 'NULL';
   return `'${value.replace(/\\/g, '\\\\').replace(/'/g, "\\'")}'`;
 }
 
 function fileKind(ext: string): 'source' | 'config' | 'other' {
-  if (['.ts', '.tsx', '.js', '.jsx', '.mts', '.cts', '.php', '.py', '.rb', '.go', '.java', '.cs', '.cpp', '.c', '.rs'].includes(ext))
+  if (
+    ['.ts', '.tsx', '.js', '.jsx', '.mts', '.cts', '.php', '.py', '.rb', '.go', '.java', '.cs', '.cpp', '.c', '.rs'].includes(ext)
+  )
     return 'source';
   if (['.json', '.yaml', '.yml', '.toml', '.xml', '.env', '.ini', '.cfg', '.conf'].includes(ext))
     return 'config';
   return 'other';
 }
 
-async function upsertFile(conn: Connection, id: string, ext: string): Promise<void> {
-  const result = await conn.query(`CREATE (:File {
-    id: ${esc(id)},
-    path: ${esc(id)},
-    ext: ${esc(ext)},
-    kind: ${esc(fileKind(ext))}
-  })`);
-  if (result && !Array.isArray(result)) result.close();
-}
-
-async function upsertCodeSymbol(conn: Connection, symbol: CodeSymbol): Promise<void> {
-  const result = await conn.query(`CREATE (:CodeSymbol {
-    id: ${esc(symbol.id)},
-    fqn: ${esc(symbol.fqn)},
-    symbol_type: ${esc(symbol.kind)},
-    file_path: ${esc(symbol.filePath)},
-    line_start: ${symbol.lineStart},
-    line_end: ${symbol.lineEnd},
-    language: ${esc(symbol.language)}
-  })`);
-  if (result && !Array.isArray(result)) result.close();
-}
-
-async function linkContainsFileToSymbol(conn: Connection, fileId: string, symbolId: string): Promise<void> {
-  const result = await conn.query(
-    `MATCH (f:File {id: ${esc(fileId)}}), (c:CodeSymbol {id: ${esc(symbolId)}})
-     CREATE (f)-[:CONTAINS]->(c)`,
-  );
-  if (result && !Array.isArray(result)) result.close();
-}
-
-async function linkContainsSymbolToSymbol(conn: Connection, parentId: string, childId: string): Promise<void> {
-  const result = await conn.query(
-    `MATCH (p:CodeSymbol {id: ${esc(parentId)}}), (c:CodeSymbol {id: ${esc(childId)}})
-     CREATE (p)-[:CONTAINS]->(c)`,
-  );
-  if (result && !Array.isArray(result)) result.close();
-}
-
-/**
- * Resolve a targetName (e.g. "SomeClass" or "SomeClass.method") against the
- * full set of extracted symbols. Tries exact FQN match first, then suffix match
- * for namespaced PHP classes (e.g. "Product" matches "App.Models.Product").
- */
 function resolveCallTarget(targetName: string, symbols: CodeSymbol[]): CodeSymbol | null {
   const exact = symbols.find((s) => s.fqn === targetName);
   if (exact) return exact;
@@ -86,44 +51,320 @@ function resolveCallTarget(targetName: string, symbols: CodeSymbol[]): CodeSymbo
   return symbols.find((s) => s.fqn.endsWith(suffix)) ?? null;
 }
 
-async function linkCall(
-  conn: Connection,
-  callerSymbolId: string,
-  targetSymbolId: string,
-  callKind: string,
-): Promise<void> {
-  const result = await conn.query(
-    `MATCH (caller:CodeSymbol {id: ${esc(callerSymbolId)}}), (target:CodeSymbol {id: ${esc(targetSymbolId)}})
-     CREATE (caller)-[:CALLS {call_kind: ${esc(callKind)}}]->(target)`,
-  );
+async function runQuery(conn: Connection, cypher: string): Promise<void> {
+  const result = await conn.query(cypher);
   if (result && !Array.isArray(result)) result.close();
 }
 
-async function linkImplementation(
+async function batchQuery(
   conn: Connection,
-  symbolId: string,
-  specId: string,
-  confidence: number,
+  items: string[],
+  buildQuery: (list: string) => string,
 ): Promise<void> {
-  const result = await conn.query(
-    `MATCH (c:CodeSymbol {id: ${esc(symbolId)}}), (s:Spec {id: ${esc(specId)}})
-     CREATE (c)-[:IMPLEMENTS {confidence: ${confidence}}]->(s)`,
-  );
-  if (result && !Array.isArray(result)) result.close();
+  for (let i = 0; i < items.length; i += BATCH_SIZE) {
+    const batch = items.slice(i, i + BATCH_SIZE);
+    if (batch.length === 0) continue;
+    await runQuery(conn, buildQuery(batch.join(', ')));
+  }
 }
 
-async function linkFileImplementation(
-  conn: Connection,
-  fileId: string,
-  specId: string,
-): Promise<void> {
-  const result = await conn.query(
-    `MATCH (f:File {id: ${esc(fileId)}}), (s:Spec {id: ${esc(specId)}})
-     CREATE (f)-[:IMPLEMENTS {confidence: 1.0}]->(s)`,
-  );
-  if (result && !Array.isArray(result)) result.close();
+function fileRow(id: string, ext: string): string {
+  return `{id: ${esc(id)}, path: ${esc(id)}, ext: ${esc(ext)}, kind: ${esc(fileKind(ext))}}`;
 }
 
+function symbolRow(sym: CodeSymbol): string {
+  return `{id: ${esc(sym.id)}, fqn: ${esc(sym.fqn)}, symbol_type: ${esc(sym.kind)}, file_path: ${esc(sym.filePath)}, line_start: ${sym.lineStart}, line_end: ${sym.lineEnd}, language: ${esc(sym.language)}}`;
+}
+
+async function insertFiles(
+  conn: Connection,
+  files: Map<string, string>,
+  onProgress?: (n: number, total: number) => void,
+  offset = 0,
+  total = 0,
+): Promise<number> {
+  const rows = [...files.entries()].map(([id, ext]) => fileRow(id, ext));
+  let inserted = 0;
+  for (let i = 0; i < rows.length; i += BATCH_SIZE) {
+    const batch = rows.slice(i, i + BATCH_SIZE);
+    await runQuery(
+      conn,
+      `UNWIND [${batch.join(', ')}] AS row CREATE (:File {id: row.id, path: row.path, ext: row.ext, kind: row.kind})`,
+    );
+    inserted += batch.length;
+    onProgress?.(offset + inserted, total);
+  }
+  return inserted;
+}
+
+async function insertSymbols(
+  conn: Connection,
+  symbols: CodeSymbol[],
+  onProgress?: (n: number, total: number) => void,
+  offset = 0,
+  total = 0,
+): Promise<void> {
+  const rows = symbols.map(symbolRow);
+  let inserted = 0;
+  for (let i = 0; i < rows.length; i += BATCH_SIZE) {
+    const batch = rows.slice(i, i + BATCH_SIZE);
+    await runQuery(
+      conn,
+      `UNWIND [${batch.join(', ')}] AS row CREATE (:CodeSymbol {id: row.id, fqn: row.fqn, symbol_type: row.symbol_type, file_path: row.file_path, line_start: row.line_start, line_end: row.line_end, language: row.language})`,
+    );
+    inserted += batch.length;
+    onProgress?.(offset + inserted, total);
+  }
+}
+
+function buildContainsPairs(
+  symbols: CodeSymbol[],
+): { fileToSymbol: [string, string][]; symbolToSymbol: [string, string][] } {
+  const fileToSymbol: [string, string][] = [];
+  const symbolToSymbol: [string, string][] = [];
+
+  const byFile = new Map<string, CodeSymbol[]>();
+  for (const sym of symbols) {
+    const list = byFile.get(sym.filePath) ?? [];
+    list.push(sym);
+    byFile.set(sym.filePath, list);
+  }
+
+  for (const fileSymbols of byFile.values()) {
+    const fqnMap = new Map(fileSymbols.map((s) => [s.fqn, s]));
+    for (const sym of fileSymbols) {
+      const dotIdx = sym.fqn.lastIndexOf('.');
+      if (dotIdx !== -1) {
+        const parentFqn = sym.fqn.slice(0, dotIdx);
+        const parent = fqnMap.get(parentFqn);
+        if (parent) {
+          symbolToSymbol.push([parent.id, sym.id]);
+          continue;
+        }
+      }
+      fileToSymbol.push([sym.filePath, sym.id]);
+    }
+  }
+
+  return { fileToSymbol, symbolToSymbol };
+}
+
+async function insertContainsEdges(
+  conn: Connection,
+  pairs: { fileToSymbol: [string, string][]; symbolToSymbol: [string, string][] },
+): Promise<number> {
+  const f2s = pairs.fileToSymbol.map(([f, s]) => `[${esc(f)}, ${esc(s)}]`);
+  const s2s = pairs.symbolToSymbol.map(([p, c]) => `[${esc(p)}, ${esc(c)}]`);
+
+  await batchQuery(
+    conn,
+    f2s,
+    (list) =>
+      `UNWIND [${list}] AS e MATCH (f:File {id: e[1]}), (c:CodeSymbol {id: e[2]}) CREATE (f)-[:CONTAINS]->(c)`,
+  );
+  await batchQuery(
+    conn,
+    s2s,
+    (list) =>
+      `UNWIND [${list}] AS e MATCH (p:CodeSymbol {id: e[1]}), (c:CodeSymbol {id: e[2]}) CREATE (p)-[:CONTAINS]->(c)`,
+  );
+
+  return pairs.fileToSymbol.length + pairs.symbolToSymbol.length;
+}
+
+async function insertCallsEdges(
+  conn: Connection,
+  callRefs: CallRef[],
+  allSymbols: CodeSymbol[],
+): Promise<number> {
+  const resolved: [string, string, string][] = [];
+  for (const ref of callRefs) {
+    const target = resolveCallTarget(ref.targetName, allSymbols);
+    if (target) resolved.push([ref.callerSymbolId, target.id, ref.kind]);
+  }
+
+  const rows = resolved.map(([caller, target, kind]) => `[${esc(caller)}, ${esc(target)}, ${esc(kind)}]`);
+  await batchQuery(
+    conn,
+    rows,
+    (list) =>
+      `UNWIND [${list}] AS e MATCH (caller:CodeSymbol {id: e[1]}), (target:CodeSymbol {id: e[2]}) CREATE (caller)-[:CALLS {call_kind: e[3]}]->(target)`,
+  );
+
+  return resolved.length;
+}
+
+async function insertImplementsEdges(
+  conn: Connection,
+  links: Array<{ symbolId: string; specId: string; confidence: number }>,
+): Promise<void> {
+  const rows = links.map(({ symbolId, specId, confidence }) =>
+    `[${esc(symbolId)}, ${esc(specId)}, ${confidence}]`,
+  );
+  await batchQuery(
+    conn,
+    rows,
+    (list) =>
+      `UNWIND [${list}] AS e MATCH (c:CodeSymbol {id: e[1]}), (s:Spec {id: e[2]}) CREATE (c)-[:IMPLEMENTS {confidence: e[3]}]->(s)`,
+  );
+}
+
+async function insertFileImplementsEdges(
+  conn: Connection,
+  edges: [string, string][],
+): Promise<void> {
+  const rows = edges.map(([fileId, specId]) => `[${esc(fileId)}, ${esc(specId)}]`);
+  await batchQuery(
+    conn,
+    rows,
+    (list) =>
+      `UNWIND [${list}] AS e MATCH (f:File {id: e[1]}), (s:Spec {id: e[2]}) CREATE (f)-[:IMPLEMENTS {confidence: 1.0}]->(s)`,
+  );
+}
+
+const WORKER_COUNT = Math.max(1, Math.min(os.cpus().length, 8));
+
+type ParseBatch = { allSymbols: CodeSymbol[]; allCallRefs: CallRef[]; parseErrors: number; scannedFiles: Map<string, string> };
+
+function parseSerial(
+  files: { absPath: string; relPath: string; ext: string }[],
+  onProgress?: (n: number, total: number) => void,
+): ParseBatch {
+  const allSymbols: CodeSymbol[] = [];
+  const allCallRefs: CallRef[] = [];
+  const scannedFiles = new Map<string, string>();
+  let parseErrors = 0;
+  for (let i = 0; i < files.length; i++) {
+    const { absPath, relPath, ext } = files[i];
+    const parser = getParserForExtension(ext);
+    if (!parser) { onProgress?.(i + 1, files.length); continue; }
+    scannedFiles.set(relPath, ext);
+    try {
+      const source = fs.readFileSync(absPath, 'utf-8');
+      const symbols = parser.extractSymbols(relPath, source);
+      allSymbols.push(...symbols);
+      if (parser.extractCallRefs) allCallRefs.push(...parser.extractCallRefs(relPath, source, symbols));
+    } catch {
+      parseErrors++;
+    }
+    onProgress?.(i + 1, files.length);
+  }
+  return { allSymbols, allCallRefs, parseErrors, scannedFiles };
+}
+
+// Resolve the worker script path. Returns null if not available (e.g. unbuilt dev tree).
+function resolveWorkerScript(): string | null {
+  if (process.env['SPECGRAPH_WORKERS'] === '0') return null;
+  try {
+    const thisFile = fileURLToPath(import.meta.url);
+    // dist/cli/index.js → dist/analyzer/parse-worker.js
+    const distAnalyzer = path.resolve(path.dirname(thisFile), '..', 'analyzer', 'parse-worker.js');
+    if (fs.existsSync(distAnalyzer)) return distAnalyzer;
+    // Same directory (when indexer is also in dist/analyzer/)
+    const sameDir = path.resolve(path.dirname(thisFile), 'parse-worker.js');
+    if (fs.existsSync(sameDir)) return sameDir;
+  } catch {
+    // ignore
+  }
+  return null;
+}
+
+async function parseWithWorkers(
+  files: { absPath: string; relPath: string; ext: string }[],
+  onProgress?: (n: number, total: number) => void,
+): Promise<ParseBatch> {
+  if (files.length === 0) return { allSymbols: [], allCallRefs: [], parseErrors: 0, scannedFiles: new Map() };
+
+  const workerScript = resolveWorkerScript();
+  if (!workerScript) return parseSerial(files, onProgress);
+
+  const allSymbols: CodeSymbol[] = [];
+  const allCallRefs: CallRef[] = [];
+  const scannedFiles = new Map<string, string>();
+  let parseErrors = 0;
+  let completed = 0;
+
+  const workerUrl = new URL(`file://${workerScript}`);
+  const numWorkers = Math.min(WORKER_COUNT, files.length);
+
+  return new Promise((resolve, reject) => {
+    const workers: Worker[] = [];
+    const queue = [...files];
+    let pending = 0;
+
+    const dispatch = (worker: Worker) => {
+      const task = queue.shift();
+      if (!task) return;
+      pending++;
+      worker.postMessage({ relPath: task.relPath, absPath: task.absPath, ext: task.ext } satisfies ParseTask);
+    };
+
+    const onMessage = (worker: Worker) => (result: ParseResult) => {
+      pending--;
+      completed++;
+      scannedFiles.set(result.relPath, path.extname(result.relPath).toLowerCase());
+      if (result.error) {
+        parseErrors++;
+      } else {
+        allSymbols.push(...result.symbols);
+        allCallRefs.push(...result.callRefs);
+      }
+      onProgress?.(completed, files.length);
+      if (queue.length > 0) {
+        dispatch(worker);
+      } else if (pending === 0) {
+        for (const w of workers) void w.terminate();
+        resolve({ allSymbols, allCallRefs, parseErrors, scannedFiles });
+      }
+    };
+
+    for (let i = 0; i < numWorkers; i++) {
+      try {
+        const worker = new Worker(workerUrl);
+        worker.on('message', onMessage(worker));
+        worker.on('error', (err) => {
+          for (const w of workers) void w.terminate();
+          reject(err);
+        });
+        workers.push(worker);
+        dispatch(worker);
+      } catch {
+        break;
+      }
+    }
+
+    if (workers.length === 0) {
+      resolve(parseSerial(files, onProgress));
+    }
+  });
+}
+
+/** Separate file-type implements from code-symbol implements. */
+function partitionImplsByType(specs: ParsedSpec[]): {
+  fileImplsBySpecId: Map<string, string[]>;
+  specsForResolver: ParsedSpec[];
+} {
+  const fileImplsBySpecId = new Map<string, string[]>();
+  for (const spec of specs) {
+    for (const impl of spec.frontmatter.implements ?? []) {
+      if (impl.type === 'file') {
+        const list = fileImplsBySpecId.get(spec.id) ?? [];
+        list.push(impl.symbol);
+        fileImplsBySpecId.set(spec.id, list);
+      }
+    }
+  }
+  const specsForResolver = specs.map((spec) => ({
+    ...spec,
+    frontmatter: {
+      ...spec.frontmatter,
+      implements: (spec.frontmatter.implements ?? []).filter((i) => i.type !== 'file'),
+    },
+  }));
+  return { fileImplsBySpecId, specsForResolver };
+}
+
+/** Full rebuild — re-scans all files and rewrites the entire code graph. */
 export async function analyzeAndIndex(
   conn: Connection,
   projectDir: string,
@@ -144,163 +385,191 @@ export async function analyzeAndIndex(
     renameSuggestions: [],
   };
 
-  // Separate file-type implements from code-symbol implements so the resolver
-  // never sees file paths (which would incorrectly appear as unresolved drift).
-  const fileImplsBySpecId = new Map<string, string[]>();
-  for (const spec of specs) {
-    for (const impl of spec.frontmatter.implements ?? []) {
-      if (impl.type === 'file') {
-        const list = fileImplsBySpecId.get(spec.id) ?? [];
-        list.push(impl.symbol);
-        fileImplsBySpecId.set(spec.id, list);
-      }
-    }
-  }
-  // Specs visible to the code resolver have file-type entries stripped.
-  const specsForResolver: ParsedSpec[] = specs.map((spec) => ({
-    ...spec,
-    frontmatter: {
-      ...spec.frontmatter,
-      implements: (spec.frontmatter.implements ?? []).filter((i) => i.type !== 'file'),
-    },
-  }));
+  const { fileImplsBySpecId, specsForResolver } = partitionImplsByType(specs);
 
   const extensions = getExtensionsForLanguages(config.analyze.languages);
-  if (extensions.length === 0) {
-    return stats;
-  }
+  if (extensions.length === 0) return stats;
 
   const includeDirs = config.analyze.include.map((d) => path.resolve(projectDir, d));
   const files = walkFiles(includeDirs, extensions, config.analyze.exclude);
   const totalFiles = files.length;
 
-  const allSymbols: CodeSymbol[] = [];
-  const allCallRefs: CallRef[] = [];
-  // Track which files were scanned (relPath → ext)
-  const scannedFiles = new Map<string, string>();
-
-  // Phase 1 — parse all files
-  for (const filePath of files) {
-    stats.filesScanned++;
-    onProgress?.('scan', stats.filesScanned, totalFiles);
-
+  // Phase 1 — parse (parallel workers when available)
+  const fileTasks = files.flatMap((filePath) => {
     const ext = path.extname(filePath).toLowerCase();
-    const parser = getParserForExtension(ext);
-    if (!parser) continue;
+    if (!getParserForExtension(ext)) return [];
+    return [{ absPath: filePath, relPath: path.relative(projectDir, filePath), ext }];
+  });
+  stats.filesScanned = files.length;
 
-    const relPath = path.relative(projectDir, filePath);
-    scannedFiles.set(relPath, ext);
+  const {
+    allSymbols,
+    allCallRefs,
+    parseErrors: workerParseErrors,
+    scannedFiles,
+  } = await parseWithWorkers(fileTasks, onProgress ? (n, t) => onProgress('scan', n, t) : undefined);
+  stats.symbolsFound = allSymbols.length;
+  stats.parseErrors = workerParseErrors;
 
-    try {
-      const source = fs.readFileSync(filePath, 'utf-8');
-      const symbols = parser.extractSymbols(relPath, source);
-      allSymbols.push(...symbols);
-      stats.symbolsFound += symbols.length;
-
-      if (parser.extractCallRefs) {
-        const callRefs = parser.extractCallRefs(relPath, source, symbols);
-        allCallRefs.push(...callRefs);
-      }
-    } catch {
-      stats.parseErrors++;
-    }
-  }
-
-  // Phase 2 — write to graph. Clear previous File/CodeSymbol data in two
-  // queries rather than one DELETE per node (2× fewer round-trips).
-  const clearCs = await conn.query('MATCH (c:CodeSymbol) DETACH DELETE c');
-  if (clearCs && !Array.isArray(clearCs)) clearCs.close();
-  const clearF = await conn.query('MATCH (f:File) DETACH DELETE f');
-  if (clearF && !Array.isArray(clearF)) clearF.close();
+  // Phase 2 — clear and write
+  await runQuery(conn, 'MATCH (c:CodeSymbol) DETACH DELETE c');
+  await runQuery(conn, 'MATCH (f:File) DETACH DELETE f');
 
   const totalNodes = scannedFiles.size + allSymbols.length;
-  let nodesIndexed = 0;
 
-  // Insert File nodes for every scanned source file.
-  for (const [relPath, ext] of scannedFiles) {
-    await upsertFile(conn, relPath, ext);
-    stats.fileNodesCreated++;
-    onProgress?.('index', ++nodesIndexed, totalNodes);
-  }
+  stats.fileNodesCreated = await insertFiles(conn, scannedFiles, onProgress ? (n, t) => onProgress('index', n, t) : undefined, 0, totalNodes);
+  await insertSymbols(conn, allSymbols, onProgress ? (n, t) => onProgress('index', n, t) : undefined, scannedFiles.size, totalNodes);
 
-  // Insert all discovered CodeSymbol nodes.
-  for (const symbol of allSymbols) {
-    await upsertCodeSymbol(conn, symbol);
-    onProgress?.('index', ++nodesIndexed, totalNodes);
-  }
+  const containsPairs = buildContainsPairs(allSymbols);
+  stats.containsEdgesCreated = await insertContainsEdges(conn, containsPairs);
 
-  // Build CONTAINS edges.
-  // Group symbols by file so we can resolve parent FQNs within the same file.
-  const symbolsByFile = new Map<string, CodeSymbol[]>();
-  for (const sym of allSymbols) {
-    const list = symbolsByFile.get(sym.filePath) ?? [];
-    list.push(sym);
-    symbolsByFile.set(sym.filePath, list);
-  }
-  for (const [filePath, fileSymbols] of symbolsByFile) {
-    // Build a lookup: fqn → symbol (within this file)
-    const fqnMap = new Map(fileSymbols.map((s) => [s.fqn, s]));
-    for (const sym of fileSymbols) {
-      const dotIdx = sym.fqn.lastIndexOf('.');
-      if (dotIdx !== -1) {
-        const parentFqn = sym.fqn.slice(0, dotIdx);
-        const parent = fqnMap.get(parentFqn);
-        if (parent) {
-          await linkContainsSymbolToSymbol(conn, parent.id, sym.id);
-          stats.containsEdgesCreated++;
-          continue;
-        }
-      }
-      // No parent symbol found — link directly from the File node.
-      await linkContainsFileToSymbol(conn, filePath, sym.id);
-      stats.containsEdgesCreated++;
-    }
-  }
+  const implLinks = resolveImplementations(allSymbols, specsForResolver);
+  await insertImplementsEdges(conn, implLinks);
+  stats.implementationsLinked += implLinks.length;
 
-  // Resolve and create CodeSymbol IMPLEMENTS edges (file-type entries already stripped).
-  const links = resolveImplementations(allSymbols, specsForResolver);
-  for (const link of links) {
-    await linkImplementation(conn, link.symbolId, link.specId, link.confidence);
-    stats.implementationsLinked++;
-  }
+  stats.callEdgesCreated = await insertCallsEdges(conn, allCallRefs, allSymbols);
 
-  // Resolve call refs and create CALLS edges.
-  for (const ref of allCallRefs) {
-    const target = resolveCallTarget(ref.targetName, allSymbols);
-    if (target) {
-      await linkCall(conn, ref.callerSymbolId, target.id, ref.kind);
-      stats.callEdgesCreated++;
-    }
-  }
-
-  // Handle file-type implements: create File nodes + IMPLEMENTS edges, detect drift.
+  // Handle file-type implements
+  const fileImplEdges: [string, string][] = [];
   for (const [specId, filePaths] of fileImplsBySpecId) {
     for (const fileId of filePaths) {
       const absPath = path.resolve(projectDir, fileId);
       if (!fs.existsSync(absPath)) {
-        // File not on disk → drift
         stats.driftWarnings.push(`${specId}: ${fileId} not found`);
         stats.unresolvedSymbols++;
         continue;
       }
       const ext = path.extname(fileId).toLowerCase();
-      // Upsert File node if not already created by the source-file pass.
       if (!scannedFiles.has(fileId)) {
-        await upsertFile(conn, fileId, ext);
+        await insertFiles(conn, new Map([[fileId, ext]]));
         stats.fileNodesCreated++;
       }
-      await linkFileImplementation(conn, fileId, specId);
-      stats.implementationsLinked++;
+      fileImplEdges.push([fileId, specId]);
     }
   }
+  await insertFileImplementsEdges(conn, fileImplEdges);
+  stats.implementationsLinked += fileImplEdges.length;
 
-  // Detect drift for code-symbol implements entries.
   const unresolved = findUnresolvedImplementations(allSymbols, specsForResolver);
   stats.unresolvedSymbols += unresolved.length;
-  stats.driftWarnings.push(
-    ...unresolved.map((u) => `${u.specId}: ${u.symbolId} not found`),
-  );
+  stats.driftWarnings.push(...unresolved.map((u) => `${u.specId}: ${u.symbolId} not found`));
   stats.renameSuggestions = suggestRenames(unresolved, allSymbols);
+
+  return stats;
+}
+
+/** Incremental rebuild — only re-processes files whose mtime changed. */
+export async function analyzeAndIndexIncremental(
+  conn: Connection,
+  projectDir: string,
+  specs: ParsedSpec[],
+  config: SpecGraphConfig,
+  changedPaths: Set<string>,
+  deletedPaths: Set<string>,
+  onProgress?: (phase: 'scan' | 'index', n: number, total: number) => void,
+): Promise<AnalysisStats> {
+  const stats: AnalysisStats = {
+    filesScanned: 0,
+    symbolsFound: 0,
+    implementationsLinked: 0,
+    callEdgesCreated: 0,
+    containsEdgesCreated: 0,
+    fileNodesCreated: 0,
+    parseErrors: 0,
+    unresolvedSymbols: 0,
+    driftWarnings: [],
+    renameSuggestions: [],
+  };
+
+  const { fileImplsBySpecId, specsForResolver } = partitionImplsByType(specs);
+
+  const toDelete = new Set([...changedPaths, ...deletedPaths]);
+  for (const relPath of toDelete) {
+    await runQuery(conn, `MATCH (c:CodeSymbol {file_path: ${esc(relPath)}}) DETACH DELETE c`);
+    await runQuery(conn, `MATCH (f:File {id: ${esc(relPath)}}) DETACH DELETE f`);
+  }
+
+  // Parse only changed files (parallel workers when available)
+  const fileTasks = [...changedPaths].flatMap((relPath) => {
+    const ext = path.extname(relPath).toLowerCase();
+    if (!getParserForExtension(ext)) return [];
+    return [{ absPath: path.resolve(projectDir, relPath), relPath, ext }];
+  });
+  stats.filesScanned = changedPaths.size;
+
+  const {
+    allSymbols: newSymbols,
+    allCallRefs: newCallRefs,
+    parseErrors: workerParseErrors,
+    scannedFiles: newFiles,
+  } = await parseWithWorkers(fileTasks, onProgress ? (n, t) => onProgress('scan', n, t) : undefined);
+  stats.symbolsFound = newSymbols.length;
+  stats.parseErrors = workerParseErrors;
+
+  const totalNodes = newFiles.size + newSymbols.length;
+  if (totalNodes > 0) {
+    stats.fileNodesCreated = await insertFiles(conn, newFiles, onProgress ? (n, t) => onProgress('index', n, t) : undefined, 0, totalNodes);
+    await insertSymbols(conn, newSymbols, onProgress ? (n, t) => onProgress('index', n, t) : undefined, newFiles.size, totalNodes);
+
+    const containsPairs = buildContainsPairs(newSymbols);
+    stats.containsEdgesCreated = await insertContainsEdges(conn, containsPairs);
+
+    // Query existing symbols for cross-file CALLS resolution
+    const { rows } = await queryAll(
+      conn,
+      'MATCH (c:CodeSymbol) RETURN c.id AS id, c.fqn AS fqn, c.file_path AS filePath, c.symbol_type AS kind, c.line_start AS lineStart, c.line_end AS lineEnd, c.language AS language',
+    );
+    const existingSymbols: CodeSymbol[] = rows.map((r) => ({
+      id: String(r['id']),
+      fqn: String(r['fqn']),
+      filePath: String(r['filePath']),
+      kind: String(r['kind']) as CodeSymbol['kind'],
+      lineStart: Number(r['lineStart']),
+      lineEnd: Number(r['lineEnd']),
+      language: String(r['language']),
+    }));
+    const allCurrentSymbols = [...existingSymbols, ...newSymbols];
+
+    stats.callEdgesCreated = await insertCallsEdges(conn, newCallRefs, allCurrentSymbols);
+
+    const implLinks = resolveImplementations(newSymbols, specsForResolver);
+    await insertImplementsEdges(conn, implLinks);
+    stats.implementationsLinked += implLinks.length;
+  }
+
+  // File-type implements (always re-resolve for changed files)
+  const fileImplEdges: [string, string][] = [];
+  for (const [specId, filePaths] of fileImplsBySpecId) {
+    for (const fileId of filePaths) {
+      if (!changedPaths.has(fileId)) continue;
+      const absPath = path.resolve(projectDir, fileId);
+      if (!fs.existsSync(absPath)) {
+        stats.driftWarnings.push(`${specId}: ${fileId} not found`);
+        stats.unresolvedSymbols++;
+        continue;
+      }
+      const ext = path.extname(fileId).toLowerCase();
+      if (!newFiles.has(fileId)) {
+        await insertFiles(conn, new Map([[fileId, ext]]));
+        stats.fileNodesCreated++;
+      }
+      fileImplEdges.push([fileId, specId]);
+    }
+  }
+  await insertFileImplementsEdges(conn, fileImplEdges);
+  stats.implementationsLinked += fileImplEdges.length;
+
+  // Drift detection uses all symbols currently in the DB
+  const { rows: allSymRows } = await queryAll(conn, 'MATCH (c:CodeSymbol) RETURN c.id AS id');
+  const allSymbolIds = new Set(allSymRows.map((r) => String(r['id'])));
+  for (const spec of specsForResolver) {
+    for (const impl of spec.frontmatter.implements ?? []) {
+      if (!allSymbolIds.has(impl.symbol)) {
+        stats.driftWarnings.push(`${spec.id}: ${impl.symbol} not found`);
+        stats.unresolvedSymbols++;
+      }
+    }
+  }
 
   return stats;
 }
