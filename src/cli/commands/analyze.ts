@@ -23,7 +23,22 @@ async function runOneAnalyze(
 
   const { db, conn } = await openDatabase(projectDir);
   try {
-    const stats = await analyzeAndIndex(conn, projectDir, specs, config);
+    const isTTY = process.stdout.isTTY;
+    let lastPhase = '';
+    const onProgress = verbose
+      ? (phase: 'scan' | 'index', n: number, total: number) => {
+          if (!isTTY) return;
+          const label = phase === 'scan' ? 'Scanning' : 'Indexing';
+          if (phase !== lastPhase) {
+            if (lastPhase) process.stdout.write('\n');
+            lastPhase = phase;
+          }
+          process.stdout.write(`\r  ${label}... (${n}/${total})`);
+        }
+      : undefined;
+
+    const stats = await analyzeAndIndex(conn, projectDir, specs, config, onProgress);
+    if (verbose && isTTY && lastPhase) process.stdout.write('\n');
 
     if (verbose) {
       console.log('');

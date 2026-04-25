@@ -36,7 +36,6 @@ function fileKind(ext: string): 'source' | 'config' | 'other' {
 }
 
 async function upsertFile(conn: Connection, id: string, ext: string): Promise<void> {
-  await conn.query(`MATCH (f:File {id: ${esc(id)}}) DETACH DELETE f`);
   const result = await conn.query(`CREATE (:File {
     id: ${esc(id)},
     path: ${esc(id)},
@@ -47,7 +46,6 @@ async function upsertFile(conn: Connection, id: string, ext: string): Promise<vo
 }
 
 async function upsertCodeSymbol(conn: Connection, symbol: CodeSymbol): Promise<void> {
-  await conn.query(`MATCH (c:CodeSymbol {id: ${esc(symbol.id)}}) DETACH DELETE c`);
   const result = await conn.query(`CREATE (:CodeSymbol {
     id: ${esc(symbol.id)},
     fqn: ${esc(symbol.fqn)},
@@ -131,6 +129,7 @@ export async function analyzeAndIndex(
   projectDir: string,
   specs: ParsedSpec[],
   config: SpecGraphConfig,
+  onProgress?: (phase: 'scan' | 'index', n: number, total: number) => void,
 ): Promise<AnalysisStats> {
   const stats: AnalysisStats = {
     filesScanned: 0,
@@ -173,14 +172,18 @@ export async function analyzeAndIndex(
 
   const includeDirs = config.analyze.include.map((d) => path.resolve(projectDir, d));
   const files = walkFiles(includeDirs, extensions, config.analyze.exclude);
+  const totalFiles = files.length;
 
   const allSymbols: CodeSymbol[] = [];
   const allCallRefs: CallRef[] = [];
   // Track which files were scanned (relPath → ext)
   const scannedFiles = new Map<string, string>();
 
+  // Phase 1 — parse all files
   for (const filePath of files) {
     stats.filesScanned++;
+    onProgress?.('scan', stats.filesScanned, totalFiles);
+
     const ext = path.extname(filePath).toLowerCase();
     const parser = getParserForExtension(ext);
     if (!parser) continue;
@@ -203,15 +206,27 @@ export async function analyzeAndIndex(
     }
   }
 
-  // Upsert File nodes for every scanned source file.
+  // Phase 2 — write to graph. Clear previous File/CodeSymbol data in two
+  // queries rather than one DELETE per node (2× fewer round-trips).
+  const clearCs = await conn.query('MATCH (c:CodeSymbol) DETACH DELETE c');
+  if (clearCs && !Array.isArray(clearCs)) clearCs.close();
+  const clearF = await conn.query('MATCH (f:File) DETACH DELETE f');
+  if (clearF && !Array.isArray(clearF)) clearF.close();
+
+  const totalNodes = scannedFiles.size + allSymbols.length;
+  let nodesIndexed = 0;
+
+  // Insert File nodes for every scanned source file.
   for (const [relPath, ext] of scannedFiles) {
     await upsertFile(conn, relPath, ext);
     stats.fileNodesCreated++;
+    onProgress?.('index', ++nodesIndexed, totalNodes);
   }
 
-  // Upsert all discovered CodeSymbol nodes.
+  // Insert all discovered CodeSymbol nodes.
   for (const symbol of allSymbols) {
     await upsertCodeSymbol(conn, symbol);
+    onProgress?.('index', ++nodesIndexed, totalNodes);
   }
 
   // Build CONTAINS edges.
