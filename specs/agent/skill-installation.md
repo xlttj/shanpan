@@ -31,5 +31,7 @@ the directories written so the user can confirm placement.
 
 ## Skills installed
 
-- **spec-lookup** — find specs that govern a symbol or topic before implementing
-- **create-spec** — create a new spec with correct frontmatter and link it to symbols
+- **spec-lookup** — find specs that govern a symbol or topic before implementing; reminds agent to read `acceptance_criteria` before writing code
+- **create-spec** — create a new spec with correct frontmatter, add structured `acceptance_criteria`, link to symbols; includes splitting heuristics
+- **plan-feature** — interview the user to decompose a feature into intent / business_rule / software_requirement specs before any code is written; creates all specs as `draft` so they serve as the task list
+- **track-progress** — check remaining `draft` specs via `query_graph`, mark specs `active` as implemented, define done as zero remaining drafts + zero drift
