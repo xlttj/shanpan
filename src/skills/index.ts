@@ -124,71 +124,91 @@ description: Decompose a new feature into intent, business rule, and software re
 
 # Plan Feature
 
-Interview the user to understand a feature fully, then create all specs as \`draft\`
-before any implementation starts. The spec files become the task list.
+The goal is to gather exactly enough information to write **precise, unambiguous specs**.
+Precise means: every \`acceptance_criteria\` entry is independently testable, every
+\`business_rule\` has no undefined edge cases, and every \`software_requirement\` names
+a concrete actor, trigger, and observable outcome.
 
 ## When to use
 
 - At the very start of a feature task, before touching any code
-- When asked to plan or design a feature
-- Before an OpenSpec migration batch
+- When handed a prompt, JIRA issue, user story, or design note to implement
 
-## Interview steps
+## How to interview
 
-Ask these questions **one at a time**. Wait for the answer before asking the next.
+**Do not use a fixed question list.** Instead:
 
-1. **Goal**: What is the user-facing outcome this feature delivers? Who benefits and how?
-2. **Constraints**: What must always be true, regardless of how it is implemented?
-   (Probe: edge cases, forbidden states, invariants, "what can never happen?")
-3. **Behaviour**: Walk me through the main scenario step by step — what triggers it,
-   what happens, what does the user or system observe at the end?
-4. **Error cases**: What happens when something goes wrong? Are there rejection or
-   rollback behaviours?
-5. **Scope boundary**: What is explicitly out of scope for this change?
+1. Read the input (prompt / ticket / design doc) carefully.
+2. Draft the spec tree you *would* write right now based only on what is given.
+3. Identify every field you cannot fill in precisely:
+   - A \`given\` that is vague ("a valid user") — what makes a user valid here?
+   - A \`then\` that is unmeasurable ("it works correctly") — what exactly is observed?
+   - A \`business_rule\` constraint implied but not stated — what are the limits?
+   - An actor or trigger that is ambiguous — who initiates this, under what condition?
+   - An error case mentioned but not described — what happens, what does the user see?
+   - A scope boundary that is unclear — does X fall inside or outside this change?
+4. Ask **only** about those gaps, one question at a time. Do not ask about things
+   already answered in the input, even implicitly.
+5. After each answer, re-evaluate: can you now write that field precisely?
+   If yes, move to the next gap. If a new gap surfaced, ask about that.
+6. Stop asking when every field in your draft spec tree can be written without
+   placeholders, qualifiers like "as needed", or assumed behaviour.
+
+## Precision checklist — gaps that block spec writing
+
+Use this to identify what to ask about, not as a question script:
+
+- [ ] Who or what initiates the behaviour? (actor / trigger)
+- [ ] What is the exact precondition? (not just role, but state)
+- [ ] What is the observable outcome? (what changes, what is returned, what is shown)
+- [ ] What are the rejection / error cases and their outcomes?
+- [ ] Are there quantities, thresholds, or time constraints?
+- [ ] What must never happen, regardless of implementation? (invariants)
+- [ ] What is explicitly excluded from this change?
+- [ ] Which module or service owns this? (needed to find symbols later)
 
 ## Decomposition
 
-From the answers, build a spec tree — do not flatten everything into one spec:
+From the completed picture, build a spec tree:
 
 \`\`\`
-intent              ← the "why" (one per feature)
-  ├── business_rule ← each hard constraint from question 2
-  ├── business_rule ← each error/rejection rule from question 4
-  └── software_requirement ← main happy-path behaviour (question 3)
-  └── software_requirement ← each significant error behaviour (question 4)
+intent                  ← the "why" (one per feature)
+  ├── business_rule     ← each hard invariant ("must / must not / always / never")
+  ├── business_rule     ← each rejection rule with defined outcome
+  └── software_requirement  ← main happy-path behaviour
+  └── software_requirement  ← each significant error / alternative flow
 \`\`\`
 
-Create each spec using \`create_spec\`, all with \`status: draft\`:
-- \`intent\` specs: body = goal and motivation; no acceptance_criteria needed
-- \`business_rule\` specs: body = the rule stated plainly; list edge cases as bullets
-- \`software_requirement\` specs: add \`acceptance_criteria\` entries (one per scenario)
+Create each spec using \`create_spec\`, all with \`status: draft\`.
 
-## Acceptance criteria format
+- \`intent\`: body = motivation and user benefit; no \`acceptance_criteria\`; add "## Out of scope" section
+- \`business_rule\`: body = rule stated plainly; bullet any edge cases; no \`acceptance_criteria\`
+- \`software_requirement\`: add \`acceptance_criteria\` to the frontmatter:
 
 \`\`\`yaml
 acceptance_criteria:
-  - given: "precondition describing the starting state"
-    when: "the action or event that occurs"
-    then: "the observable outcome that must result"
+  - given: "specific, concrete precondition"
+    when: "exact action or event"
+    then: "observable, testable outcome"
 \`\`\`
 
 Merge multi-step Given/And into one \`given\` string. Same for When and Then.
+For Scenario Outline / examples: one entry per concrete input row.
 
 ## Confirming the plan
 
-After creating all specs, call:
+After creating all specs, show the user:
 \`\`\`
 query_graph("MATCH (s:Spec {status: 'draft'}) RETURN s.id, s.title, s.type ORDER BY s.type, s.id")
 \`\`\`
-Show the result to the user and ask: "Does this cover everything, or are there missing cases?"
-Adjust specs before writing any code.
+Ask: "Does this cover all cases, or are there gaps?" Do not start implementation until confirmed.
 
 ## Notes
 
-- Do not start implementation until the user confirms the spec tree
-- If the feature is small (one acceptance criterion, no hard constraints), one
-  \`software_requirement\` spec is sufficient — do not over-split
-- Out-of-scope items do not need specs; note them in the intent body under "## Out of scope"
+- A small feature with one scenario and no hard constraints needs only one
+  \`software_requirement\` — do not over-split
+- If the input already answers everything precisely, skip straight to spec creation
+- Never fill a gap with an assumption — ask
 `,
 };
 
