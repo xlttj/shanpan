@@ -198,14 +198,14 @@ async function insertImplementsEdges(
   conn: Connection,
   links: Array<{ symbolId: string; specId: string; confidence: number }>,
 ): Promise<void> {
-  const rows = links.map(({ symbolId, specId, confidence }) =>
-    `[${esc(symbolId)}, ${esc(specId)}, ${confidence}]`,
+  const rows = links.map(({ symbolId, specId }) =>
+    `[${esc(symbolId)}, ${esc(specId)}]`,
   );
   await batchQuery(
     conn,
     rows,
     (list) =>
-      `UNWIND [${list}] AS e MATCH (c:CodeSymbol {id: e[1]}), (s:Spec {id: e[2]}) CREATE (c)-[:IMPLEMENTS {confidence: e[3]}]->(s)`,
+      `UNWIND [${list}] AS e MATCH (c:CodeSymbol {id: e[1]}), (s:Spec {id: e[2]}) CREATE (c)-[:IMPLEMENTS {confidence: 1.0}]->(s)`,
   );
 }
 
