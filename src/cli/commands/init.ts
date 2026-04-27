@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import readline from 'node:readline';
 import { openDatabase, closeDatabase, ensureSchema, getDbPath, DB_DIR } from '../../core/db.js';
-import { saveConfig } from '../../core/config.js';
+import { saveConfig, RC_FILE } from '../../core/config.js';
 import { DEFAULT_CONFIG } from '../../types/config.js';
 import { SKILLS } from '../../skills/index.js';
 import { IDE_INTEGRATIONS, installIdeHooks, type IdeIntegration } from '../../core/ide-hooks.js';
@@ -94,16 +94,24 @@ export async function runInit(options: { specsDir?: string }): Promise<void> {
   await ensureSchema(conn);
   await closeDatabase(db, conn);
 
-  const config = structuredClone(DEFAULT_CONFIG);
-  config.specsDir = path.relative(projectDir, specsDir);
-  saveConfig(projectDir, config);
+  const rcPath = path.join(projectDir, RC_FILE);
+  const rcExists = fs.existsSync(rcPath);
+  if (!rcExists) {
+    const config = structuredClone(DEFAULT_CONFIG);
+    config.specsDir = path.relative(projectDir, specsDir);
+    saveConfig(projectDir, config);
+  }
 
   const selectedIdes = await promptIdeSelection(projectDir);
   const skillDirs = writeSkills(projectDir);
 
   console.log('');
   console.log(chalk.green(`✓ Created ${DB_DIR}/ with empty graph database`));
-  console.log(chalk.green(`✓ Created ${DB_DIR}/config.json with default settings`));
+  if (rcExists) {
+    console.log(chalk.gray(`  Using existing ${RC_FILE}`));
+  } else {
+    console.log(chalk.green(`✓ Created ${RC_FILE} with default settings`));
+  }
   console.log(chalk.green(`✓ Specs directory ready at ${path.relative(projectDir, specsDir)}/`));
   for (const dir of skillDirs) {
     console.log(chalk.green(`✓ Wrote agent skills to ${dir}/`));
@@ -123,10 +131,6 @@ export async function runInit(options: { specsDir?: string }): Promise<void> {
   console.log(chalk.gray('  2. Run `specgraph index` to build the graph'));
   console.log(chalk.gray('  3. Run `specgraph analyze` to scan source code'));
   console.log(chalk.gray('  4. Run `specgraph status` to inspect the graph'));
-  console.log('');
-  console.log(chalk.gray('For git pre-commit drift checks:'));
-  console.log(chalk.gray('  echo "specgraph check --staged" >> .git/hooks/pre-commit'));
-  console.log(chalk.gray('  chmod +x .git/hooks/pre-commit'));
   console.log('');
   console.log(chalk.gray('To start the MCP server: specgraph mcp --project-dir <path>'));
 }
