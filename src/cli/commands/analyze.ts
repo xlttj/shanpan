@@ -77,12 +77,15 @@ async function runOneAnalyze(
   full: boolean,
 ): Promise<{ filesScanned: number; driftCount: number }> {
   const specsDir = path.resolve(projectDir, config.specsDir);
-  const { specs } = parseAllSpecs(specsDir);
+  const { specs, warnings } = parseAllSpecs(specsDir);
 
   if (verbose) {
     console.log(chalk.cyan('Analyzing source code…'));
     console.log(chalk.gray(`  Directories: ${config.analyze.include.join(', ')}`));
     console.log(chalk.gray(`  Languages:   ${config.analyze.languages.join(', ')}`));
+    for (const w of warnings) {
+      console.warn(chalk.yellow(`  ⚠ ${w}`));
+    }
   }
 
   // Compute changed/deleted files unless forced full rebuild
