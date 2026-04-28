@@ -195,7 +195,9 @@ One spec per architectural layer. Never put domain aggregate logic and UI behavi
 Create each spec using \`create_spec\`, all with \`status: draft\`.
 
 - \`intent\`: body = motivation and user benefit; no \`acceptance_criteria\`; add "## Out of scope" section
-- \`business_rule\`: body = rule stated plainly; bullet any edge cases; no \`acceptance_criteria\`
+- \`business_rule\`: rules go in the **markdown body** under a \`## Rules\` heading as a bullet list —
+  there is no \`rules:\` frontmatter field; the only valid frontmatter fields are
+  \`title\`, \`type\`, \`status\`, \`created\`, \`implements\`, \`acceptance_criteria\`, \`refs\`, \`defines_rules\`
 - \`software_requirement\`: add \`acceptance_criteria\` to the frontmatter:
 
 \`\`\`yaml
