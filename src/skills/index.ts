@@ -102,10 +102,20 @@ structured acceptance criteria.
 ## Splitting heuristics
 
 - One \`acceptance_criteria\` entry that could independently fail → candidate for its own spec
-- "Must not" / "Must always" phrasing → \`business_rule\`, not \`software_requirement\`
+- More than 5 \`acceptance_criteria\` entries → stop and actively check for mixed concerns before adding more
+- "Must not" / "Must always" / "SHALL NOT" phrasing → \`business_rule\`, not \`software_requirement\`
 - Two behaviours owned by different teams → two specs
 - If you need "and also" to describe it → split it
+- UI behaviour (navigation, forms, display rules) and domain/application behaviour → always separate specs
+- One spec per architectural layer: domain aggregate logic, application command handling, and UI are always different specs
 - One feature typically yields: 1 \`intent\` + 1–3 \`business_rule\` + 1–3 \`software_requirement\`
+- Every feature needs an \`intent\` spec; if none exists yet, create it first
+
+## Symbol linking rules
+
+- Link to the class or method that **does** the work — the one that holds logic and makes decisions
+- Do NOT link to data carriers: Command, DTO, ValueObject, Event classes carry data but implement nothing
+- When in doubt: if the class has no methods beyond a constructor and getters, it is a data carrier — skip it
 
 ## Notes
 
@@ -172,12 +182,15 @@ Use this to identify what to ask about, not as a question script:
 From the completed picture, build a spec tree:
 
 \`\`\`
-intent                  ← the "why" (one per feature)
-  ├── business_rule     ← each hard invariant ("must / must not / always / never")
-  ├── business_rule     ← each rejection rule with defined outcome
-  └── software_requirement  ← main happy-path behaviour
-  └── software_requirement  ← each significant error / alternative flow
+intent                       ← the "why" (one per feature, always required)
+  ├── business_rule          ← each hard invariant ("must / must not / always / never / SHALL NOT")
+  ├── business_rule          ← each rejection / idempotency rule with defined outcome
+  ├── software_requirement   ← domain / aggregate behaviour (one per logical concern)
+  ├── software_requirement   ← application layer behaviour (commands, handlers)
+  └── software_requirement   ← UI behaviour (forms, navigation, search) — always separate from domain
 \`\`\`
+
+One spec per architectural layer. Never put domain aggregate logic and UI behaviour in the same spec.
 
 Create each spec using \`create_spec\`, all with \`status: draft\`.
 
