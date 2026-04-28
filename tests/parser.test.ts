@@ -113,4 +113,53 @@ describe('parseAllSpecs', () => {
     expect(errors).toHaveLength(1);
     expect(errors[0]).toContain("Missing required field 'title'");
   });
+
+  it('warns on unknown frontmatter fields', () => {
+    writeSpec('unknown-fields.md', `---
+title: "Test"
+type: software_requirement
+status: draft
+rules:
+  - must not do X
+widgets: 42
+---
+`);
+    const { specs, warnings } = parseAllSpecs(tmpDir);
+    expect(specs).toHaveLength(1);
+    expect(warnings).toHaveLength(2);
+    expect(warnings.some((w) => w.includes("'rules'"))).toBe(true);
+    expect(warnings.some((w) => w.includes("'widgets'"))).toBe(true);
+  });
+
+  it('emits no warnings for valid frontmatter fields', () => {
+    writeSpec('valid.md', `---
+title: "Test"
+type: business_rule
+status: active
+created: '2026-01-01'
+implements:
+  - symbol: src/foo.ts::bar
+    type: method
+refs:
+  - https://example.com
+---
+`);
+    const { warnings } = parseAllSpecs(tmpDir);
+    expect(warnings).toHaveLength(0);
+  });
+
+  it('onWarning callback fires for unknown fields in parseSpecFile', () => {
+    const filePath = writeSpec('spec.md', `---
+title: "Test"
+type: software_requirement
+status: draft
+rules:
+  - must not do X
+---
+`);
+    const collected: string[] = [];
+    parseSpecFile(filePath, undefined, (msg) => collected.push(msg));
+    expect(collected).toHaveLength(1);
+    expect(collected[0]).toContain("'rules'");
+  });
 });

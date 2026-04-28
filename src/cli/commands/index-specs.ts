@@ -15,12 +15,19 @@ export async function runIndex(options: { specsDir?: string }): Promise<void> {
   const specsDir = path.resolve(projectDir, options.specsDir ?? 'specs');
   console.log(chalk.cyan(`Indexing specs from ${path.relative(projectDir, specsDir)}/…`));
 
-  const { specs, errors: parseErrors } = parseAllSpecs(specsDir);
+  const { specs, errors: parseErrors, warnings } = parseAllSpecs(specsDir);
 
   if (parseErrors.length > 0) {
     console.error(chalk.red('\nParse errors:'));
     for (const err of parseErrors) {
       console.error(chalk.red(`  ✗ ${err}`));
+    }
+  }
+
+  if (warnings.length > 0) {
+    console.warn(chalk.yellow('\nFrontmatter warnings:'));
+    for (const w of warnings) {
+      console.warn(chalk.yellow(`  ⚠ ${w}`));
     }
   }
 

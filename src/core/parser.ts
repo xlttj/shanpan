@@ -3,7 +3,16 @@ import fs from 'node:fs';
 import path from 'node:path';
 import type { ParsedSpec, SpecFrontmatter } from '../types/spec.js';
 
-export function parseSpecFile(filePath: string, specsDir?: string): ParsedSpec {
+const KNOWN_FRONTMATTER_KEYS = new Set([
+  'title', 'type', 'status', 'created', 'priority', 'author',
+  'defines_rules', 'implements', 'acceptance_criteria', 'refs',
+]);
+
+export function parseSpecFile(
+  filePath: string,
+  specsDir?: string,
+  onWarning?: (msg: string) => void,
+): ParsedSpec {
   const raw = fs.readFileSync(filePath, 'utf-8');
   const { data, content } = matter(raw);
   const frontmatter = data as SpecFrontmatter;
@@ -15,6 +24,13 @@ export function parseSpecFile(filePath: string, specsDir?: string): ParsedSpec {
   for (const impl of frontmatter.implements ?? []) {
     if (!impl.symbol || typeof impl.symbol !== 'string') {
       throw new Error(`Invalid implements entry in ${filePath}: missing 'symbol' string field`);
+    }
+  }
+
+  if (onWarning) {
+    const unknown = Object.keys(data).filter((k) => !KNOWN_FRONTMATTER_KEYS.has(k));
+    for (const key of unknown) {
+      onWarning(`unknown frontmatter field '${key}'`);
     }
   }
 
@@ -36,18 +52,20 @@ export function findSpecFiles(specsDir: string): string[] {
   return files.sort();
 }
 
-export function parseAllSpecs(specsDir: string): { specs: ParsedSpec[]; errors: string[] } {
+export function parseAllSpecs(specsDir: string): { specs: ParsedSpec[]; errors: string[]; warnings: string[] } {
   const files = findSpecFiles(specsDir);
   const specs: ParsedSpec[] = [];
   const errors: string[] = [];
+  const warnings: string[] = [];
 
   for (const file of files) {
+    const label = path.basename(file);
     try {
-      specs.push(parseSpecFile(file, specsDir));
+      specs.push(parseSpecFile(file, specsDir, (msg) => warnings.push(`${label}: ${msg}`)));
     } catch (err) {
-      errors.push(`${path.basename(file)}: ${(err as Error).message}`);
+      errors.push(`${label}: ${(err as Error).message}`);
     }
   }
 
-  return { specs, errors };
+  return { specs, errors, warnings };
 }
