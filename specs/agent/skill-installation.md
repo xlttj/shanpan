@@ -23,8 +23,9 @@ the Agent Skills open standard (agentskills.io).
 
 `writeSkills` iterates over `SKILLS` and writes each one to `<clientDir>/skills/<name>/SKILL.md`.
 It always writes to `.claude/skills/` (creating it if absent) and additionally writes to
-`.cursor/skills/` if a `.cursor/` directory already exists in the project root. Each skill
-occupies its own subdirectory named after the skill's `name` frontmatter field.
+`.cursor/skills/` and `.opencode/skills/` if those client directories already exist in the
+project root. Each skill occupies its own subdirectory named after the skill's `name`
+frontmatter field.
 
 `runInit` calls `writeSkills` after the graph database and config are created, and logs
 the directories written so the user can confirm placement.

@@ -8,7 +8,7 @@ import { DEFAULT_CONFIG } from '../../types/config.js';
 import { SKILLS } from '../../skills/index.js';
 import { IDE_INTEGRATIONS, installIdeHooks, type IdeIntegration } from '../../core/ide-hooks.js';
 
-const SKILL_CLIENT_DIRS = ['.claude', '.cursor'] as const;
+const SKILL_CLIENT_DIRS = ['.claude', '.cursor', '.opencode'] as const;
 
 function writeSkills(projectDir: string): string[] {
   const written: string[] = [];
@@ -29,8 +29,8 @@ function writeSkills(projectDir: string): string[] {
 
 function detectIdes(projectDir: string): IdeIntegration[] {
   return IDE_INTEGRATIONS.filter((ide) => {
-    const dir = path.join(projectDir, path.dirname(ide.settingsPath));
-    return fs.existsSync(dir);
+    const probe = ide.detectionPath ?? path.dirname(ide.settingsPath);
+    return fs.existsSync(path.join(projectDir, probe));
   });
 }
 
@@ -38,7 +38,7 @@ function buildMenuOptions(detected: IdeIntegration[]): string {
   return IDE_INTEGRATIONS.map((ide, i) => {
     const hint = detected.some((d) => d.id === ide.id) ? chalk.gray('[detected]') : '';
     return `  ${i + 1}) ${ide.label} ${hint}`.trimEnd();
-  }).join('\n') + `\n  ${IDE_INTEGRATIONS.length + 1}) Both\n  ${IDE_INTEGRATIONS.length + 2}) Skip`;
+  }).join('\n') + `\n  ${IDE_INTEGRATIONS.length + 1}) All\n  ${IDE_INTEGRATIONS.length + 2}) Skip`;
 }
 
 async function promptIdeSelection(projectDir: string): Promise<IdeIntegration[]> {

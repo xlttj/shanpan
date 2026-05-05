@@ -22,8 +22,9 @@ writes agent hooks to the appropriate IDE settings file. Hooks automate graph sy
 and drift detection during AI sessions without requiring manual intervention.
 
 `IDE_INTEGRATIONS` is the registry of supported IDEs. Each entry implements `IdeIntegration`
-with an `id`, `label`, `settingsPath` (relative to project root), and `buildHooksConfig()`
-returning the hooks object to merge.
+with an `id`, `label`, `settingsPath` (relative to project root), optional `detectionPath`
+(directory probed during auto-detection; defaults to `dirname(settingsPath)`), and
+`buildHooksConfig()` returning the hooks object to merge.
 
 `mergeSettings` reads the target settings file (or starts from `{}`), deep-merges the new
 hooks configuration preserving any existing entries, and writes the result back as formatted
@@ -49,8 +50,9 @@ Claude Code parses the JSON rather than treating it as a hook failure.
 
 ## Supported IDEs
 
-- **Claude Code**: `.claude/settings.json` (format confirmed)
-- **Cursor**: `.cursor/settings.json` (format assumed equivalent; stubbed for correction)
+- **Claude Code**: settings at `.claude/settings.json`; hooks use `{ hooks: { PostToolUse, Stop } }` format.
+- **Cursor**: settings at `.cursor/settings.json`; same hook format as Claude Code; detected via `.cursor/` dir.
+- **OpenCode**: settings at `opencode.json` (project root); hooks use `{ experimental: { hook: { file_edited, session_completed } } }` format; detected via `.opencode/` dir. Each hook command is an argv array.
 
 The `IdeIntegration` interface allows adding further IDEs without changing the installation
 logic in `runInit`.

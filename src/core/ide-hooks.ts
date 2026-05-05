@@ -5,6 +5,7 @@ export interface IdeIntegration {
   id: string;
   label: string;
   settingsPath: string; // relative to project root
+  detectionPath?: string; // directory to probe for auto-detection; defaults to dirname(settingsPath)
   buildHooksConfig(): object;
 }
 
@@ -49,7 +50,28 @@ export const cursorIntegration: IdeIntegration = {
   buildHooksConfig: () => HOOKS_CONFIG,
 };
 
-export const IDE_INTEGRATIONS: IdeIntegration[] = [claudeCodeIntegration, cursorIntegration];
+const OPENCODE_HOOKS_CONFIG = {
+  experimental: {
+    hook: {
+      file_edited: [
+        { command: ['specgraph', 'analyze'] },
+      ],
+      session_completed: [
+        { command: ['specgraph', 'check', '--hook-output'] },
+      ],
+    },
+  },
+};
+
+export const openCodeIntegration: IdeIntegration = {
+  id: 'opencode',
+  label: 'OpenCode',
+  settingsPath: 'opencode.json',
+  detectionPath: '.opencode',
+  buildHooksConfig: () => OPENCODE_HOOKS_CONFIG,
+};
+
+export const IDE_INTEGRATIONS: IdeIntegration[] = [claudeCodeIntegration, cursorIntegration, openCodeIntegration];
 
 function deepMerge(target: Record<string, unknown>, source: Record<string, unknown>): Record<string, unknown> {
   const result: Record<string, unknown> = { ...target };
