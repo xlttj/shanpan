@@ -167,17 +167,33 @@ function collectCallRefs(
     if (funcNode?.type === 'member_expression') {
       const objNode = funcNode.childForFieldName('object');
       const propNode = funcNode.childForFieldName('property');
-      // Only handle simple identifiers — skip `this.foo()`, `super.foo()`
-      if (objNode?.type === 'identifier' && propNode) {
+      if (objNode && propNode) {
         const line = node.startPosition.row + 1;
         const enclosing = findEnclosingSymbol(symbols, line);
         if (enclosing) {
-          results.push({
-            callerSymbolId: enclosing.id,
-            targetName: `${objNode.text}.${propNode.text}`,
-            kind: 'static_call',
-            line,
-          });
+          if (objNode.type === 'identifier') {
+            // SomeClass.method() or variable.method() — use as-is
+            results.push({
+              callerSymbolId: enclosing.id,
+              targetName: `${objNode.text}.${propNode.text}`,
+              kind: 'static_call',
+              line,
+            });
+          } else if (objNode.type === 'this') {
+            // this.method() — resolve target as EnclosingClass.method
+            // Chained calls (this.prop.method()) are not resolved: no type inference.
+            const dotIdx = enclosing.fqn.lastIndexOf('.');
+            if (dotIdx !== -1) {
+              const className = enclosing.fqn.slice(0, dotIdx);
+              results.push({
+                callerSymbolId: enclosing.id,
+                targetName: `${className}.${propNode.text}`,
+                kind: 'static_call',
+                line,
+              });
+            }
+          }
+          // super.method() and chained calls are intentionally skipped
         }
       }
     }

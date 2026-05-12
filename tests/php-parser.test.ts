@@ -128,6 +128,57 @@ class Svc {
     expect(inst).toBeDefined();
   });
 
+  it('captures $this->method() as intra-class call', () => {
+    const source = `<?php
+class Controller {
+  public function handle() {
+    $this->process();
+  }
+  public function process() {}
+}
+`;
+    const symbols = parser.extractSymbols('src/Controller.php', source);
+    const refs = parser.extractCallRefs!('src/Controller.php', source, symbols);
+    const call = refs.find((r) => r.targetName === 'Controller.process');
+    expect(call).toBeDefined();
+    expect(call?.callerSymbolId).toBe('src/Controller.php::Controller.handle');
+    expect(call?.kind).toBe('static_call');
+  });
+
+  it('captures multiple $this->method() calls from different callers', () => {
+    const source = `<?php
+class PreviewImageController {
+  public function __invoke() { $this->handleRequest('a'); }
+  public function pathBased() { $this->handleRequest('b'); }
+  public function handleRequest(string $x) {}
+}
+`;
+    const symbols = parser.extractSymbols('src/PreviewImageController.php', source);
+    const refs = parser.extractCallRefs!('src/PreviewImageController.php', source, symbols);
+    const invoke = refs.find(
+      (r) => r.callerSymbolId.includes('__invoke') && r.targetName === 'PreviewImageController.handleRequest',
+    );
+    const pathBased = refs.find(
+      (r) => r.callerSymbolId.includes('pathBased') && r.targetName === 'PreviewImageController.handleRequest',
+    );
+    expect(invoke).toBeDefined();
+    expect(pathBased).toBeDefined();
+  });
+
+  it('does not capture chained $this->prop->method() (DI calls)', () => {
+    const source = `<?php
+class Service {
+  public function run() {
+    $this->dependency->doWork();
+  }
+}
+`;
+    const symbols = parser.extractSymbols('src/Service.php', source);
+    const refs = parser.extractCallRefs!('src/Service.php', source, symbols);
+    // $this->dependency is a member_access_expression, not $this directly — no ref expected
+    expect(refs.every((r) => !r.targetName.includes('doWork'))).toBe(true);
+  });
+
   it('returns empty array when no calls exist', () => {
     const source = `<?php\nclass Empty {}\n`;
     const symbols = parser.extractSymbols('src/Empty.php', source);

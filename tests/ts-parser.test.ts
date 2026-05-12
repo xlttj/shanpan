@@ -127,7 +127,7 @@ export class Product {}
     expect(sc?.callerSymbolId).toBe('src/handler.ts::Handler.handle');
   });
 
-  it('skips this.method() calls', () => {
+  it('captures this.method() as intra-class call', () => {
     const src = `export class A {
   run() { this.init(); }
   init() {}
@@ -135,7 +135,10 @@ export class Product {}
 `;
     const symbols = parser.extractSymbols('src/a.ts', src);
     const refs = parser.extractCallRefs!('src/a.ts', src, symbols);
-    expect(refs.every((r) => !r.targetName.startsWith('this.'))).toBe(true);
+    const call = refs.find((r) => r.targetName === 'A.init');
+    expect(call).toBeDefined();
+    expect(call?.callerSymbolId).toBe('src/a.ts::A.run');
+    expect(call?.kind).toBe('static_call');
   });
 
   it('skips super.method() calls', () => {
@@ -146,6 +149,17 @@ export class Product {}
     const symbols = parser.extractSymbols('src/child.ts', src);
     const refs = parser.extractCallRefs!('src/child.ts', src, symbols);
     expect(refs).toHaveLength(0);
+  });
+
+  it('does not capture chained this.prop.method() (DI calls)', () => {
+    const src = `export class Service {
+  run() { this.dependency.doWork(); }
+}
+`;
+    const symbols = parser.extractSymbols('src/service.ts', src);
+    const refs = parser.extractCallRefs!('src/service.ts', src, symbols);
+    // this.dependency is a member_expression, not a bare `this` — no ref expected
+    expect(refs.every((r) => !r.targetName.includes('doWork'))).toBe(true);
   });
 
   it('returns empty array when no calls exist', () => {

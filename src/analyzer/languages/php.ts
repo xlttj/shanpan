@@ -156,6 +156,27 @@ function collectCallRefs(
         }
       }
     }
+  } else if (node.type === 'member_call_expression') {
+    // $this->method() — resolve target as EnclosingClass.method
+    // Chained calls ($this->prop->method()) are not resolved: no type inference.
+    const objectNode = node.childForFieldName('object');
+    const nameNode = node.childForFieldName('name');
+    if (objectNode && nameNode && objectNode.text === '$this') {
+      const line = node.startPosition.row + 1;
+      const enclosing = findEnclosingSymbol(symbols, line);
+      if (enclosing) {
+        const dotIdx = enclosing.fqn.lastIndexOf('.');
+        if (dotIdx !== -1) {
+          const className = enclosing.fqn.slice(0, dotIdx);
+          results.push({
+            callerSymbolId: enclosing.id,
+            targetName: `${className}.${nameNode.text}`,
+            kind: 'static_call',
+            line,
+          });
+        }
+      }
+    }
   }
 
   for (const child of node.namedChildren) {
