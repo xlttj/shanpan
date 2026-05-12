@@ -124,6 +124,54 @@ export async function handleGetImpact(
   }
 }
 
+export async function handleGetCallersTransitive(
+  projectDir: string,
+  symbolId: string,
+  maxDepthRequested = 3,
+): Promise<{ content: { type: 'text'; text: string }[] }> {
+  const maxDepth = Math.max(1, Math.min(10, Math.floor(maxDepthRequested)));
+  const { db, conn } = await openDatabase(projectDir, true);
+  try {
+    const visited = new Map<
+      string,
+      { id: string; fqn: string; filePath: string; kind: string; depth: number; path: string[] }
+    >();
+    let frontier: { id: string; path: string[] }[] = [{ id: symbolId, path: [symbolId] }];
+    for (let depth = 1; depth <= maxDepth && frontier.length > 0; depth++) {
+      const nextFrontier: { id: string; path: string[] }[] = [];
+      for (const curr of frontier) {
+        const { rows } = await queryAll(
+          conn,
+          `MATCH (c:CodeSymbol)-[:CALLS]->(:CodeSymbol {id: '${escId(curr.id)}'})
+           RETURN DISTINCT c.id AS id, c.fqn AS fqn,
+                           c.file_path AS filePath, c.symbol_type AS kind`,
+        );
+        for (const row of rows) {
+          const id = String(row['id']);
+          if (id === symbolId || visited.has(id)) continue;
+          const newPath = [...curr.path, id];
+          visited.set(id, {
+            id,
+            fqn: String(row['fqn']),
+            filePath: String(row['filePath']),
+            kind: String(row['kind']),
+            depth,
+            path: newPath,
+          });
+          nextFrontier.push({ id, path: newPath });
+        }
+      }
+      frontier = nextFrontier;
+    }
+    const result = Array.from(visited.values()).sort(
+      (a, b) => a.depth - b.depth || a.id.localeCompare(b.id),
+    );
+    return jsonResult(result);
+  } finally {
+    await closeDatabase(db, conn);
+  }
+}
+
 interface SymbolSearchResult {
   id: string;
   fqn: string;
@@ -244,6 +292,30 @@ export async function handleGetSpecsForSymbolWithContext(
     );
     if (fileRows.length > 0) {
       result.push({ scope: 'file', symbolId: filePath, specs: fileRows });
+    }
+
+    // Specs linked to 1-hop callers (symbols that call this one)
+    const { rows: callerSpecRows } = await queryAll(
+      conn,
+      `MATCH (caller:CodeSymbol)-[:CALLS]->(:CodeSymbol {id: '${escId(symbolId)}'})
+       MATCH (caller)-[:IMPLEMENTS]->(s:Spec)
+       RETURN s.id AS id, s.title AS title, s.type AS type, s.status AS status,
+              caller.id AS viaSymbolId`,
+    );
+    if (callerSpecRows.length > 0) {
+      result.push({ scope: 'callers', symbolId, specs: callerSpecRows });
+    }
+
+    // Specs linked to 1-hop callees (symbols this one calls)
+    const { rows: calleeSpecRows } = await queryAll(
+      conn,
+      `MATCH (:CodeSymbol {id: '${escId(symbolId)}'})-[:CALLS]->(callee:CodeSymbol)
+       MATCH (callee)-[:IMPLEMENTS]->(s:Spec)
+       RETURN s.id AS id, s.title AS title, s.type AS type, s.status AS status,
+              callee.id AS viaSymbolId`,
+    );
+    if (calleeSpecRows.length > 0) {
+      result.push({ scope: 'callees', symbolId, specs: calleeSpecRows });
     }
 
     return jsonResult(result);
@@ -444,6 +516,22 @@ export async function runMcp(options: { projectDir?: string } = {}): Promise<voi
         },
       },
       {
+        name: 'get_callers_transitive',
+        description:
+          'Entry points: all symbols that transitively lead to the given symbol being called (reverse BFS via incoming CALLS edges), up to maxDepth (default 3, max 10). Each result includes depth and the call path from that entry point to the target. Use to understand who triggers this code and trace execution origins.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            symbolId: { type: 'string', description: 'Symbol ID to trace callers of' },
+            maxDepth: {
+              type: 'number',
+              description: 'Maximum BFS depth (default 3, capped at 10)',
+            },
+          },
+          required: ['symbolId'],
+        },
+      },
+      {
         name: 'search_symbols',
         description:
           'Find code symbols by partial name. Matches in three passes: exact FQN (score 100), case-insensitive substring (50), camelCase/snake_case word-prefix (25).',
@@ -478,7 +566,7 @@ export async function runMcp(options: { projectDir?: string } = {}): Promise<voi
       {
         name: 'get_specs_for_symbol_with_context',
         description:
-          'Get specs for a symbol AND its containing class/file hierarchy. Returns results grouped by scope (symbol, parent, class, file), with empty scopes omitted.',
+          'Get specs for a symbol AND its containing class/file hierarchy AND its 1-hop call-graph neighbours. Returns results grouped by scope (symbol, parent, class, file, callers, callees), with empty scopes omitted. Callers/callees entries include a viaSymbolId field showing which neighbour linked the spec.',
         inputSchema: {
           type: 'object',
           properties: {
@@ -742,6 +830,11 @@ export async function runMcp(options: { projectDir?: string } = {}): Promise<voi
     if (name === 'get_impact') {
       const maxDepth = typeof a['maxDepth'] === 'number' ? (a['maxDepth'] as number) : 3;
       return handleGetImpact(projectDir, String(a['symbolId'] ?? ''), maxDepth);
+    }
+
+    if (name === 'get_callers_transitive') {
+      const maxDepth = typeof a['maxDepth'] === 'number' ? (a['maxDepth'] as number) : 3;
+      return handleGetCallersTransitive(projectDir, String(a['symbolId'] ?? ''), maxDepth);
     }
 
     if (name === 'search_symbols') {

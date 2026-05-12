@@ -22,7 +22,7 @@ Before implementing a feature or modifying code, identify the specs that govern 
 
 ## Steps
 
-1. **Find specs for a known symbol**: call \`get_specs_for_symbol_with_context\` with the symbol's fully-qualified ID (\`filePath::fqn\`, e.g. \`src/core/parser.ts::parseSpecFile\`). This returns direct spec links and call-graph neighbours.
+1. **Find specs for a known symbol**: call \`get_specs_for_symbol_with_context\` with the symbol's fully-qualified ID (\`filePath::fqn\`, e.g. \`src/core/parser.ts::parseSpecFile\`). This returns specs for the symbol, its class hierarchy, its file, and its 1-hop call-graph neighbours — all in one call.
 
 2. **Search by topic when no symbol is known**: call \`search_symbols\` with a keyword, then call \`get_specs_for_symbol_with_context\` on each result.
 
@@ -38,12 +38,37 @@ Before implementing a feature or modifying code, identify the specs that govern 
 | You have a keyword | \`search_symbols\` → \`get_specs_for_symbol_with_context\` |
 | You want to browse | \`list_specs\` |
 | You need full spec text + criteria | \`get_spec\` |
+| Who directly calls this symbol? | \`get_callers\` |
+| What does this symbol directly call? | \`get_callees\` |
+| What entry points transitively reach this symbol? | \`get_callers_transitive\` |
+| What code is affected if I change this symbol? | \`get_impact\` |
+
+## Call-graph tools
+
+\`get_callers\` and \`get_callees\` return 1-hop neighbours. Use them to understand the
+immediate call context before writing or modifying code.
+
+\`get_callers_transitive\` walks incoming CALLS edges up to maxDepth hops (default 3).
+Use it to find all entry points — controllers, CLI handlers, event listeners — that
+eventually invoke the target. Each result includes \`depth\` and \`path\` so you can
+see the full call chain from entry point to target.
+
+\`get_impact\` walks outgoing CALLS edges transitively. Use it before refactoring to
+see what code would be affected by a change.
+
+\`get_specs_for_symbol_with_context\` also returns specs from 1-hop call-graph
+neighbours (scopes \`callers\` and \`callees\`). Each entry in those scopes includes a
+\`viaSymbolId\` field showing which neighbouring symbol linked the spec. This means
+you often get enough context in a single call without needing to chain tools.
 
 ## Notes
 
-- Prefer \`get_specs_for_symbol_with_context\` over \`get_specs_for_symbol\` — it includes call-graph neighbours and gives richer context.
-- A symbol with no linked specs is not necessarily unspecced — use \`get_unspecced_symbols\` to see what genuinely lacks coverage.
-- Always read \`acceptance_criteria\` in the spec before writing code — these are the conditions your implementation must satisfy.
+- Prefer \`get_specs_for_symbol_with_context\` over \`get_specs_for_symbol\` — it includes
+  hierarchy (symbol → class → file) AND call-graph neighbours in one call.
+- A symbol with no linked specs is not necessarily unspecced — use \`get_unspecced_symbols\`
+  to see what genuinely lacks coverage.
+- Always read \`acceptance_criteria\` in the spec before writing code — these are the
+  conditions your implementation must satisfy.
 `,
 };
 
@@ -182,12 +207,12 @@ Use this to identify what to ask about, not as a question script:
 From the completed picture, build a spec tree:
 
 \`\`\`
-intent                       ← the "why" (one per feature, always required)
-  ├── business_rule          ← each hard invariant ("must / must not / always / never / SHALL NOT")
-  ├── business_rule          ← each rejection / idempotency rule with defined outcome
-  ├── software_requirement   ← domain / aggregate behaviour (one per logical concern)
-  ├── software_requirement   ← application layer behaviour (commands, handlers)
-  └── software_requirement   ← UI behaviour (forms, navigation, search) — always separate from domain
+intent                       <- the "why" (one per feature, always required)
+  |-- business_rule          <- each hard invariant ("must / must not / always / never / SHALL NOT")
+  |-- business_rule          <- each rejection / idempotency rule with defined outcome
+  |-- software_requirement   <- domain / aggregate behaviour (one per logical concern)
+  |-- software_requirement   <- application layer behaviour (commands, handlers)
+  +-- software_requirement   <- UI behaviour (forms, navigation, search) -- always separate from domain
 \`\`\`
 
 One spec per architectural layer. Never put domain aggregate logic and UI behaviour in the same spec.

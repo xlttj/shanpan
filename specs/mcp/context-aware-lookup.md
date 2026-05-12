@@ -77,16 +77,29 @@ Returns specs for a symbol **and** its containing hierarchy, grouped by scope.
 ```
 
 **Output** — array ordered from most-specific to least-specific scope, with
-empty scopes omitted:
+empty scopes omitted. In addition to the containment hierarchy, two call-graph
+neighbour scopes are appended when specs are found:
+
 ```json
 [
-  { "scope": "symbol", "symbolId": "src/auth/session.ts::UserService.signIn", "specs": [...] },
-  { "scope": "parent", "symbolId": "src/auth/session.ts::UserService",        "specs": [...] },
-  { "scope": "file",   "symbolId": "src/auth/session.ts",                     "specs": [...] }
+  { "scope": "symbol",  "symbolId": "src/auth/session.ts::UserService.signIn", "specs": [...] },
+  { "scope": "parent",  "symbolId": "src/auth/session.ts::UserService",        "specs": [...] },
+  { "scope": "file",    "symbolId": "src/auth/session.ts",                     "specs": [...] },
+  { "scope": "callers", "symbolId": "src/auth/session.ts::UserService.signIn",
+    "specs": [{ "id": "...", "title": "...", "type": "...", "status": "...",
+                "viaSymbolId": "src/api/AuthController.ts::login" }] },
+  { "scope": "callees", "symbolId": "src/auth/session.ts::UserService.signIn",
+    "specs": [{ "id": "...", ..., "viaSymbolId": "src/core/db.ts::openDatabase" }] }
 ]
 ```
 
-For a bare file path (no `::`) the result contains only the `file` scope.
+`callers` contains specs linked to symbols that directly call the queried
+symbol; `callees` contains specs linked to symbols that the queried symbol
+directly calls. Each spec entry in these scopes includes a `viaSymbolId` field
+identifying which 1-hop neighbour brought in the spec.
+
+For a bare file path (no `::`) the result contains only the `file` scope (no
+call-graph neighbours are added).
 
 ## Acceptance criteria
 
@@ -97,4 +110,11 @@ For a bare file path (no `::`) the result contains only the `file` scope.
   IMPLEMENTS after analyze.
 - `specgraph check --staged` reports modified files that have file-level specs.
 - `get_specs_for_symbol_with_context` returns specs at each populated scope level.
-- Tests cover: CONTAINS edges built, file-level drift, context tool output.
+- When the queried symbol has callers with linked specs, a `callers` scope entry
+  is included; each spec in that entry carries a `viaSymbolId` identifying the
+  caller.
+- When the queried symbol has callees with linked specs, a `callees` scope entry
+  is included; each spec carries a `viaSymbolId` identifying the callee.
+- A bare file path produces no `callers`/`callees` scopes.
+- Tests cover: CONTAINS edges built, file-level drift, context tool output,
+  callers scope present, callees scope present, viaSymbolId populated correctly.

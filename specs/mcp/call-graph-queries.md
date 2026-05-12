@@ -10,6 +10,8 @@ implements:
     type: function
   - symbol: src/cli/commands/mcp.ts::handleGetImpact
     type: function
+  - symbol: src/cli/commands/mcp.ts::handleGetCallersTransitive
+    type: function
 ---
 # Call-graph queries via MCP
 
@@ -81,6 +83,36 @@ at most once, at the shallowest depth reached.
 The seed symbol itself is excluded from the result. A visited set prevents
 infinite loops on cyclic call graphs.
 
+### `get_callers_transitive`
+
+Returns all symbols that transitively lead to a given symbol being called, by
+following incoming CALLS edges backwards (reverse BFS). This is the inverse of
+`get_impact`: where `get_impact` answers "what breaks if I change X?",
+`get_callers_transitive` answers "what entry points eventually invoke X?".
+
+**Input**
+```json
+{ "symbolId": "src/core/db.ts::openDatabase", "maxDepth": 3 }
+```
+`maxDepth` defaults to 3, hard cap at 10.
+
+**Output** — same shape as `get_impact` (depth + path), but paths run from an
+entry-point caller down to the target symbol:
+```json
+[
+  { "id": "src/cli/commands/analyze.ts::runAnalyze",
+    "fqn": "runAnalyze",
+    "filePath": "src/cli/commands/analyze.ts",
+    "kind": "function",
+    "depth": 1,
+    "path": ["src/core/db.ts::openDatabase",
+              "src/cli/commands/analyze.ts::runAnalyze"] }
+]
+```
+
+A visited set prevents revisiting nodes on cyclic call graphs. The seed symbol
+itself is excluded from the result.
+
 ## Implementation notes
 
 Each tool handler is extracted into a named top-level function
@@ -94,9 +126,11 @@ Opening the database in read-only mode is sufficient for all three tools
 
 ## Acceptance criteria
 
-- All three tools registered in `ListToolsRequestSchema` and handled in
+- All four tools registered in `ListToolsRequestSchema` and handled in
   `CallToolRequestSchema`.
 - `get_callers` and `get_callees` covered by at least 2 tests each (result
   found, unknown symbol → empty array).
 - `get_impact` covered by at least 3 tests (1-hop, multi-hop, cycle safety).
+- `get_callers_transitive` covered by at least 3 tests (1-hop callers, multi-hop
+  chain, cycle safety).
 - Tool names listed in `EXPECTED_TOOLS` in `tests/mcp.test.ts`.
