@@ -5,7 +5,11 @@ export type SymbolKind =
   | 'interface'
   | 'type'
   | 'enum'
-  | 'constant';
+  | 'constant'
+  | 'table'
+  | 'view'
+  | 'procedure'
+  | 'trigger';
 
 export interface CodeSymbol {
   /** Unique ID: "<relativeFilePath>::<fqn>" */
