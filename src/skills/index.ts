@@ -45,6 +45,11 @@ Before implementing a feature or modifying code, identify the specs that govern 
 
 ## Call-graph tools
 
+CALLS edges exist only for languages with static analysis support (TypeScript, PHP).
+SQL symbols have no CALLS edges — \`get_callers\`, \`get_callees\`, \`get_callers_transitive\`,
+and \`get_impact\` will return empty results for \`.sql\` symbols. Use \`get_specs_for_symbol_with_context\`
+to find specs linked directly to a SQL table, view, procedure, or trigger.
+
 \`get_callers\` and \`get_callees\` return 1-hop neighbours. Use them to understand the
 immediate call context before writing or modifying code.
 
@@ -141,6 +146,16 @@ structured acceptance criteria.
 - Link to the class or method that **does** the work — the one that holds logic and makes decisions
 - Do NOT link to data carriers: Command, DTO, ValueObject, Event classes carry data but implement nothing
 - When in doubt: if the class has no methods beyond a constructor and getters, it is a data carrier — skip it
+
+**SQL symbols** use kinds \`table\`, \`view\`, \`procedure\`, \`trigger\` — link them directly:
+\`\`\`yaml
+implements:
+  - symbol: db/schema/orders.sql::orders
+    type: table
+  - symbol: db/procs/billing.sql::confirm_order
+    type: procedure
+\`\`\`
+The symbol ID is always \`filePath::objectName\` (schema prefix stripped, no quoting).
 
 ## Notes
 
