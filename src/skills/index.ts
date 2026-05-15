@@ -180,6 +180,14 @@ find, note it and tag it provisionally:
 symbol. Statements about different symbols at different architectural layers become
 different specs. Only then start writing.
 
+**When source material contradicts itself or contradicts the code**: do not resolve
+the conflict silently. Note both versions, then surface it explicitly:
+- If the code and a spec disagree, the code reflects current reality — but the spec
+  is now stale and must be updated or retired, not silently ignored.
+- If two documents disagree, flag which is newer or more authoritative and ask.
+Resolving contradictions unilaterally produces specs that look confident but embed
+an undisclosed assumption. The user needs to know.
+
 **Source material triage** — what does and does not belong in a spec:
 
 | Source material | Belongs in spec? |
