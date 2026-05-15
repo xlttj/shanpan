@@ -177,11 +177,16 @@ export async function runAnalyze(options: {
 
   const config = loadConfig(projectDir);
 
+  const hasOverrides =
+    (options.include && options.include.length > 0) ||
+    (options.exclude && options.exclude.length > 0) ||
+    (options.languages && options.languages.length > 0);
+
   if (options.include && options.include.length > 0) config.analyze.include = options.include;
   if (options.exclude && options.exclude.length > 0) config.analyze.exclude = options.exclude;
   if (options.languages && options.languages.length > 0) config.analyze.languages = options.languages;
 
-  saveConfig(projectDir, config);
+  if (hasOverrides) saveConfig(projectDir, config);
 
   await runOneAnalyze(projectDir, config, true, !!options.full);
 
