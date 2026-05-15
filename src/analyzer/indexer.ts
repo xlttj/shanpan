@@ -339,6 +339,11 @@ async function parseWithWorkers(
   });
 }
 
+/** Hint appended to drift warnings when the symbol ID looks like a bare file path. */
+function driftHint(symbolId: string): string {
+  return symbolId.includes('::') ? '' : ' — no \'::\'separator; did you mean type: file?';
+}
+
 /** Separate file-type implements from code-symbol implements. */
 function partitionImplsByType(specs: ParsedSpec[]): {
   fileImplsBySpecId: Map<string, string[]>;
@@ -452,7 +457,7 @@ export async function analyzeAndIndex(
 
   const unresolved = findUnresolvedImplementations(allSymbols, specsForResolver);
   stats.unresolvedSymbols += unresolved.length;
-  stats.driftWarnings.push(...unresolved.map((u) => `${u.specId}: ${u.symbolId} not found`));
+  stats.driftWarnings.push(...unresolved.map((u) => `${u.specId}: ${u.symbolId} not found${driftHint(u.symbolId)}`));
   stats.renameSuggestions = suggestRenames(unresolved, allSymbols);
 
   return stats;
@@ -565,7 +570,7 @@ export async function analyzeAndIndexIncremental(
   for (const spec of specsForResolver) {
     for (const impl of spec.frontmatter.implements ?? []) {
       if (!allSymbolIds.has(impl.symbol)) {
-        stats.driftWarnings.push(`${spec.id}: ${impl.symbol} not found`);
+        stats.driftWarnings.push(`${spec.id}: ${impl.symbol} not found${driftHint(impl.symbol)}`);
         stats.unresolvedSymbols++;
       }
     }

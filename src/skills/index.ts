@@ -201,6 +201,18 @@ implements:
 \`\`\`
 The symbol ID is always \`filePath::objectName\` (schema prefix stripped, no quoting).
 
+**SQL files with no CREATE statements** (cleanup scripts, migration runners, schema
+teardown files) produce no extractable symbols. Link the file itself using \`type: file\`:
+\`\`\`yaml
+implements:
+  - symbol: db/pipeline/01-cleanup.sql
+    type: file
+\`\`\`
+The symbol value is the relative file path with no \`::\` suffix.
+Do NOT use \`type: table\`, \`type: unknown\`, or any other kind here — only \`type: file\`
+causes the system to resolve the link against the filesystem rather than the symbol
+index. Any other type will produce a drift warning on every \`analyze\` run.
+
 ## Notes
 
 - Spec ID = relative file path without \`.md\` (e.g. \`orders/order-downgrade-scheduling\`)
