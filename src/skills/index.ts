@@ -157,6 +157,46 @@ each linked to its own symbols. The SQL table's spec stops at "what the table
 guarantees about its rows"; how something downstream uses it belongs in that
 consumer's spec.
 
+**Co-located symbols that serve different consumers** require special attention. If
+two symbols live in the same file but are consumed by different parts of the system,
+always ask: *what does each consumer see that the other doesn't?* That difference is
+a behavioral commitment and belongs as an acceptance criterion. A spec that links
+both symbols without stating the distinction implies they are equivalent — which
+creates false confidence and misses real regression risk.
+
+## Reading existing code and documentation
+
+When the source material is existing code, docs, or legacy spec files rather than a
+fresh requirement, do a **two-pass survey before writing anything**.
+
+**Pass 1 — inventory**: Read ALL source material. For each behavioral statement you
+find, note it and tag it provisionally:
+- *why this exists / user benefit* → likely \`intent\`
+- *must always / must never / invariant* → likely \`business_rule\`
+- *observable output of a specific symbol* → likely \`software_requirement\`
+- *how the system is organised / execution order / lifecycle contract* → likely \`project_spec\`
+
+**Pass 2 — classify and assign**: Group the tagged statements by spec type and by
+symbol. Statements about different symbols at different architectural layers become
+different specs. Only then start writing.
+
+**Source material triage** — what does and does not belong in a spec:
+
+| Source material | Belongs in spec? |
+|----------------|-----------------|
+| WHY this was built, user benefit | Yes — \`intent\` body |
+| Hard invariant ("must never", "SHALL NOT") | Yes — \`business_rule\` |
+| Observable output under specific input | Yes — \`acceptance_criteria\` |
+| Pipeline / execution order contract | Yes — \`project_spec\` |
+| Task list / implementation checklist | No — commit message or ADR |
+| Column list / parameter enumeration | No — unless each entry carries a distinct behavioral obligation |
+| Design decisions, alternatives considered | No — ADR or design doc |
+| "No behavioral change" / migration notes | No — commit message |
+
+If you find material that spans multiple rows in the "Yes" section and different
+symbols or layers, you have more than one spec to write. Create them all before
+calling \`reindex\`.
+
 ## Splitting heuristics
 
 - The prose describes behaviour of symbols in different files / languages / layers → split
@@ -261,6 +301,9 @@ a concrete actor, trigger, and observable outcome.
 
 - At the very start of a feature task, before touching any code
 - When handed a prompt, JIRA issue, user story, or design note to implement
+- When extracting specs from existing code, legacy spec files, or design documents
+  (spec archaeology): treat the existing material as evidence, run the same
+  two-pass survey described in the \`create-spec\` skill, then proceed as normal
 
 ## How to interview
 
