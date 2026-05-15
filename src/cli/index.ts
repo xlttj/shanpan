@@ -8,6 +8,7 @@ import { runAnalyze } from './commands/analyze.js';
 import { runCreate } from './commands/create.js';
 import { runUpdate } from './commands/update.js';
 import { runCheck } from './commands/check.js';
+import { runUpgrade } from './commands/upgrade.js';
 
 const program = new Command();
 
@@ -99,6 +100,12 @@ program
       status: opts.status as string | undefined,
     }),
   );
+
+program
+  .command('upgrade')
+  .description('Re-write agent skill files to the current version')
+  .option('--hooks', 'Also update IDE hook settings')
+  .action((opts) => runUpgrade({ hooks: !!opts.hooks }));
 
 program
   .command('check')

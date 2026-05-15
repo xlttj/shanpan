@@ -10,7 +10,7 @@ import { IDE_INTEGRATIONS, installIdeHooks, type IdeIntegration } from '../../co
 
 const SKILL_CLIENT_DIRS = ['.claude', '.cursor', '.opencode'] as const;
 
-function writeSkills(projectDir: string): string[] {
+export function writeSkills(projectDir: string): string[] {
   const written: string[] = [];
   for (const clientDir of SKILL_CLIENT_DIRS) {
     const clientPath = path.join(projectDir, clientDir);
@@ -41,7 +41,7 @@ function buildMenuOptions(detected: IdeIntegration[]): string {
   }).join('\n') + `\n  ${IDE_INTEGRATIONS.length + 1}) All\n  ${IDE_INTEGRATIONS.length + 2}) Skip`;
 }
 
-async function promptIdeSelection(projectDir: string): Promise<IdeIntegration[]> {
+export async function promptIdeSelection(projectDir: string): Promise<IdeIntegration[]> {
   if (!process.stdin.isTTY) {
     // Non-interactive: default to Claude Code
     return [IDE_INTEGRATIONS[0]!];
