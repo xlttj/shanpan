@@ -89,6 +89,21 @@ description: Create a new spec file with correct frontmatter and link it to code
 Create a new spec file using the \`create_spec\` MCP tool, then edit the file to add
 structured acceptance criteria.
 
+## What a spec is — and is not
+
+A spec describes **behaviour**: why the system should do something, and how it must
+respond under defined conditions. It is the contract a future change must not break.
+
+A spec is **not** a description of the code that currently exists. Do not enumerate
+columns, parameter lists, type signatures, class hierarchies, or join graphs that
+already live in the source. That information is owned by the code; duplicating it
+in a spec creates silent drift the moment the code changes.
+
+Rule of thumb: if removing this paragraph would lose **a behavioural commitment**
+(an invariant, a rejection rule, an outcome under specific input), keep it. If
+removing it only loses **a description of what was built**, delete it — the code is
+the source of truth for that.
+
 ## Spec types
 
 | type | Use for |
@@ -129,8 +144,22 @@ structured acceptance criteria.
 
 4. **Call \`reindex\`** so the graph reflects the new spec.
 
+## One spec, one primary symbol
+
+A \`software_requirement\` spec describes the behaviour of **one** thing — usually one
+class, one function, or one SQL object. The \`implements:\` list may contain multiple
+symbols, but they must form a single cohesive unit (a class plus the helper it owns,
+a SQL view plus the trigger that maintains it).
+
+When the body needs to describe how data flows from a SQL table *through* a PHP
+processor *into* an external system, that is at least two specs — one per consumer,
+each linked to its own symbols. The SQL table's spec stops at "what the table
+guarantees about its rows"; how something downstream uses it belongs in that
+consumer's spec.
+
 ## Splitting heuristics
 
+- The prose describes behaviour of symbols in different files / languages / layers → split
 - One \`acceptance_criteria\` entry that could independently fail → candidate for its own spec
 - More than 5 \`acceptance_criteria\` entries → stop and actively check for mixed concerns before adding more
 - "Must not" / "Must always" / "SHALL NOT" phrasing → \`business_rule\`, not \`software_requirement\`
@@ -140,6 +169,21 @@ structured acceptance criteria.
 - One spec per architectural layer: domain aggregate logic, application command handling, and UI are always different specs
 - One feature typically yields: 1 \`intent\` + 1–3 \`business_rule\` + 1–3 \`software_requirement\`
 - Every feature needs an \`intent\` spec; if none exists yet, create it first
+
+## Anti-patterns — do not include
+
+- **Column / field / parameter tables** that mirror the schema or signature. The code
+  already declares these; the spec's job is to say *which of them carry behavioural
+  obligations* (e.g. "must not be null", "must equal the upstream value"), not to
+  list them.
+- **"Here is what was built"** prose written after implementation. Rewrite it as
+  *"here is what the system must do"* — present tense, observable outcomes. If you
+  cannot phrase it that way, it does not belong in the spec.
+- **Implementation choices** that could be swapped without changing observable
+  behaviour (which library, which SQL dialect feature, which class is injected).
+  These belong in code comments or an ADR.
+- **Historical change logs** in the spec body. Use \`refs:\` for ticket links; the
+  story of how the spec evolved lives in git history, not in the spec.
 
 ## Symbol linking rules
 
@@ -161,7 +205,9 @@ The symbol ID is always \`filePath::objectName\` (schema prefix stripped, no quo
 
 - Spec ID = relative file path without \`.md\` (e.g. \`orders/order-downgrade-scheduling\`)
 - \`status: draft\` means planned but not yet implemented — change to \`active\` when done
-- Do not add implementation details to the body; describe observable behaviour only
+- Write present tense ("the system rejects…"), not past tense ("the system was changed to reject…")
+- A spec the code can satisfy in more than one way is a *good* spec; a spec that
+  describes one specific implementation is documentation, not a contract
 `,
 };
 
