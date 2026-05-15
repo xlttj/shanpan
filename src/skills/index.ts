@@ -379,14 +379,6 @@ acceptance_criteria:
 Merge multi-step Given/And into one \`given\` string. Same for When and Then.
 For Scenario Outline / examples: one entry per concrete input row.
 
-## Confirming the plan
-
-After creating all specs, show the user:
-\`\`\`
-query_graph("MATCH (s:Spec {status: 'draft'}) RETURN s.id, s.title, s.type ORDER BY s.type, s.id")
-\`\`\`
-Ask: "Does this cover all cases, or are there gaps?" Do not start implementation until confirmed.
-
 ## Notes
 
 - A small feature with one scenario and no hard constraints needs only one
@@ -396,76 +388,69 @@ Ask: "Does this cover all cases, or are there gaps?" Do not start implementation
 `,
 };
 
-const trackProgress: SkillDefinition = {
-  name: 'track-progress',
+const checkDrift: SkillDefinition = {
+  name: 'check-drift',
   content: `---
-name: track-progress
-description: Check what specs remain unimplemented and mark specs active as you complete them. Use throughout a feature implementation to stay oriented.
+name: check-drift
+description: Check whether code and specs are aligned. Use after any code change that renames, moves, or deletes a specced symbol, or when reviewing whether a spec is linked to its implementation.
 ---
 
-# Track Progress
+# Check Drift
 
-The spec graph is the task list. \`status: draft\` = not yet implemented.
-\`status: active\` = implemented and linked to code.
+Drift means a spec declares an \`implements\` symbol that no longer exists in the
+codebase — the spec and the code have diverged. Surfacing drift is specgraph's core
+job. Resolving it (update the spec, revert the code, or retire the spec) is the
+user's decision.
 
-## Checking what remains
-
-Run at any point to see open work for the current feature:
-
-\`\`\`
-query_graph("MATCH (s:Spec {status: 'draft'}) RETURN s.id, s.title, s.type ORDER BY s.type, s.id")
-\`\`\`
-
-For a broader picture including broken links:
+## Run the drift report
 
 \`\`\`
 get_drift_report()
 \`\`\`
 
-Drift = spec has an \`implements\` link but the symbol no longer exists.
-These are higher priority than unlinked drafts.
+The report lists every spec that declares a symbol not found in the last \`analyze\`
+run. For each entry, surface it to the user with the spec ID and the missing symbol —
+do not silently fix it or choose a replacement unilaterally.
 
-## Marking a spec implemented
+If a drift entry contains \`no '::' separator — did you mean type: file?\` the spec has
+a malformed \`implements\` entry (bare file path written as a symbol).
 
-After writing and verifying the code that satisfies a spec:
+## Link a spec to its implementation
 
-1. Find the implementing symbol ID (format: \`src/Module/File.php::ClassName::method\`).
-   Use \`search_symbols\` if unsure.
+When a spec has no \`implements\` link, or a symbol was renamed and the link is stale:
 
-2. Link it and mark active in one sequence:
+1. Find the current symbol ID:
    \`\`\`
-   update_spec({ id: "orders/order-downgrade-scheduling", addSymbols: ["src/Orders/DowngradeService.php::schedule"] })
-   update_spec({ id: "orders/order-downgrade-scheduling", status: "active" })
+   search_symbols({ query: SymbolName })
    \`\`\`
 
-3. Call \`reindex\` after every 3–5 specs so the graph stays current.
+2. Add the link:
+   \`\`\`
+   update_spec({ id: orders/order-downgrade-scheduling, addSymbols: [src/Orders/DowngradeService.php::DowngradeService.schedule] })
+   \`\`\`
 
-## Definition of done for a feature
+3. Remove a stale link if the symbol was renamed:
+   \`\`\`
+   update_spec({ id: ..., removeSymbols: [old/path.php::OldName] })
+   \`\`\`
 
-A feature implementation is complete when **all three** conditions hold:
+4. Run \`reindex\` after edits so the graph reflects the current state.
 
-1. \`query_graph("MATCH (s:Spec {status: 'draft'}) ..."\` returns no rows for the specs
-   created during planning
-2. \`get_drift_report()\` returns no new drift entries
-3. Every \`software_requirement\` spec has at least one entry in \`implements\`
-   (verify with \`get_spec\` on each)
+## Status field
 
-Do not close a task or end a session until these conditions are confirmed.
+\`status: draft\` — behavioral commitment defined; not yet linked to an implementation.
+\`status: active\` — linked to code via at least one valid \`implements\` entry.
 
-## Handling blocked specs
+Status is metadata about linkage completeness, not a task completion flag. Whether
+to link remaining drafts is a product decision, not a specgraph concern.
 
-If a spec cannot be implemented in this session (dependency, missing info):
-- Do not mark it \`active\`
-- Add a one-line note to the spec body starting with \`> Blocked:\` explaining why
-- Report the blocked spec IDs to the user before stopping
+## When to run
 
-## Notes
-
-- \`business_rule\` specs often have no direct \`implements\` link — they are enforced
-  across multiple symbols. Mark them \`active\` when all their \`acceptance_criteria\`
-  are covered by tests or by linked \`software_requirement\` specs.
-- Never mark a spec \`active\` speculatively — only after the code exists and is linked.
+- After renaming, moving, or deleting any symbol that may be referenced by a spec
+- When \`specgraph analyze\` reports drift warnings in its output
+- When onboarding to a codebase to understand which specs are linked vs unlinked
+- After a batch of spec creation to verify all \`implements\` entries resolved
 `,
 };
 
-export const SKILLS: SkillDefinition[] = [specLookup, createSpec, planFeature, trackProgress];
+export const SKILLS: SkillDefinition[] = [specLookup, createSpec, planFeature, checkDrift];
