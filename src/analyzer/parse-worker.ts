@@ -1,6 +1,7 @@
 import { workerData, parentPort } from 'node:worker_threads';
 import { TypeScriptParser } from './languages/typescript.js';
 import { PhpParser } from './languages/php.js';
+import { SqlParser } from './languages/sql.js';
 import type { LanguageParser } from './languages/parser.js';
 import type { CodeSymbol, CallRef } from '../types/code.js';
 
@@ -18,7 +19,7 @@ export interface ParseResult {
 }
 
 // One parser instance per worker — re-used across all files assigned to this worker.
-const parsers: LanguageParser[] = [new TypeScriptParser(), new PhpParser()];
+const parsers: LanguageParser[] = [new TypeScriptParser(), new PhpParser(), new SqlParser()];
 
 function getParser(ext: string): LanguageParser | undefined {
   return parsers.find((p) => p.extensions.includes(ext));

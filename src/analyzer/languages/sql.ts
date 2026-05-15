@@ -18,7 +18,7 @@ const SQL_PATTERNS: SqlPattern[] = [
   },
   {
     kind: 'view',
-    re: new RegExp(String.raw`\bCREATE\s+(?:OR\s+REPLACE\s+)?(?:MATERIALIZED\s+)?VIEW\s+(${n})`, 'i'),
+    re: new RegExp(String.raw`\bCREATE\s+(?:OR\s+REPLACE\s+)?(?:ALGORITHM\s*=\s*\w+\s+)?(?:DEFINER\s*=\s*\S+\s+)?(?:SQL\s+SECURITY\s+\w+\s+)?(?:MATERIALIZED\s+)?VIEW\s+(${n})`, 'i'),
   },
   {
     kind: 'function',
