@@ -190,6 +190,26 @@ consumer's spec.
 - Link to the class or method that **does** the work — the one that holds logic and makes decisions
 - Do NOT link to data carriers: Command, DTO, ValueObject, Event classes carry data but implement nothing
 - When in doubt: if the class has no methods beyond a constructor and getters, it is a data carrier — skip it
+- Use \`search_symbols\` to look up the exact symbol ID before writing it — a wrong ID
+  produces a drift warning on every \`analyze\` run
+
+**TypeScript / PHP symbols** — the symbol ID is always \`filePath::fqn\`. Methods use dot
+notation: \`ClassName.methodName\`. The \`type\` field is informational metadata for humans
+and graph queries; it does not affect how the link is resolved (only \`type: file\` has
+routing significance):
+\`\`\`yaml
+implements:
+  - symbol: src/Orders/DowngradeService.php::DowngradeService
+    type: class
+  - symbol: src/Orders/DowngradeService.php::DowngradeService.schedule
+    type: method
+  - symbol: src/utils/pricing.ts::calculateDiscount
+    type: function
+  - symbol: src/contracts/OrderRepository.ts::OrderRepository
+    type: interface
+\`\`\`
+Valid \`type\` values for TypeScript: \`class\`, \`interface\`, \`function\`, \`method\`, \`type\`,
+\`enum\`. For PHP: \`class\`, \`interface\`, \`trait\`, \`enum\`, \`function\`, \`method\`.
 
 **SQL symbols** use kinds \`table\`, \`view\`, \`procedure\`, \`trigger\` — link them directly:
 \`\`\`yaml
