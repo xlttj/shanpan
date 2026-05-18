@@ -535,6 +535,21 @@ to link remaining drafts is a product decision, not a specgraph concern.
 - When \`specgraph analyze\` reports drift warnings in its output
 - When onboarding to a codebase to understand which specs are linked vs unlinked
 - After a batch of spec creation to verify all \`implements\` entries resolved
+
+## Stop-hook drift warnings
+
+If you receive a hook message of the form *"Spec drift: N new broken link(s) detected"*,
+the IDE Stop hook is reporting drift that is **new since its last check**. Each broken
+link is announced exactly once per state change. After investigating:
+
+- If the warning concerns a spec **unrelated to your current task**, acknowledge it to
+  the user once and move on — do not re-run \`get_drift_report\` on later turns hoping
+  the warning will reappear. It will not, by design.
+- If the warning concerns code **you just changed**, run \`get_drift_report\` to see the
+  full broken (specId, symbolId) pair, then update the spec via \`update_spec\` or retire
+  it.
+- The hook's silence on later turns means *"no new drift since last check"*, not
+  *"everything is fine"* — use \`get_drift_report\` for an authoritative current view.
 `,
 };
 

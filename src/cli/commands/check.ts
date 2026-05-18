@@ -1,9 +1,7 @@
 import chalk from 'chalk';
 import { execFileSync } from 'node:child_process';
 import { openDatabase, closeDatabase, dbExists, queryAll, escId } from '../../core/db.js';
-import { loadConfig } from '../../core/config.js';
-import { findSpecFiles, parseSpecFile } from '../../core/parser.js';
-import path from 'node:path';
+import { computeDrift, driftKey, loadDriftCache, saveDriftCache } from '../../core/drift.js';
 
 interface StagedChanges {
   removed: string[]; // deleted or renamed — symbol IDs definitively broken
@@ -57,40 +55,43 @@ async function runHookOutputCheck(projectDir: string): Promise<void> {
   }
 
   const { db, conn } = await openDatabase(projectDir, true);
-  let brokenCount = 0;
+  let drift;
   try {
-    const { rows } = await queryAll(
-      conn,
-      'MATCH (c:CodeSymbol) RETURN c.id AS id',
-    );
-    const knownIds = new Set(rows.map((r) => String(r['id'])));
-
-    const config = loadConfig(projectDir);
-    const specsDir = path.resolve(projectDir, config.specsDir);
-    for (const filePath of findSpecFiles(specsDir)) {
-      try {
-        const parsed = parseSpecFile(filePath);
-        for (const impl of parsed.frontmatter.implements ?? []) {
-          if (!knownIds.has(impl.symbol)) brokenCount++;
-        }
-      } catch {
-        // skip malformed
-      }
-    }
+    drift = await computeDrift(conn, projectDir);
   } finally {
     await closeDatabase(db, conn);
   }
 
-  if (brokenCount > 0) {
-    process.stdout.write(
-      JSON.stringify({
-        decision: 'block',
-        reason: `Spec drift: ${brokenCount} broken link${brokenCount === 1 ? '' : 's'} detected. Run \`specgraph check\` or use the MCP \`get_drift_report\` tool.`,
-      }),
-    );
-  } else {
+  // Only block on drift that is new since the last hook invocation. Without
+  // this, persistent drift would re-fire the block message on every Stop event
+  // and trap the agent in a loop, repeatedly investigating drift it has already
+  // been told about and cannot fix without explicit user intent.
+  const previouslyReported = loadDriftCache(projectDir);
+  const newDrift = drift.filter((d) => !previouslyReported.has(driftKey(d)));
+  saveDriftCache(projectDir, drift);
+
+  if (newDrift.length === 0) {
     process.stdout.write('{}');
+    return;
   }
+
+  const preview = newDrift
+    .slice(0, 3)
+    .map((d) => `  - ${d.specId} → ${d.symbolId}`)
+    .join('\n');
+  const more = newDrift.length > 3 ? `\n  …and ${newDrift.length - 3} more` : '';
+  const plural = newDrift.length === 1 ? '' : 's';
+
+  process.stdout.write(
+    JSON.stringify({
+      decision: 'block',
+      reason:
+        `Spec drift: ${newDrift.length} new broken link${plural} detected:\n${preview}${more}\n` +
+        'Run `specgraph check` or use the MCP `get_drift_report` tool to inspect, ' +
+        'then update the affected spec(s). This warning is shown once per drift state — ' +
+        'do not retry the same checks if it does not reappear.',
+    }),
+  );
 }
 
 export async function runCheck(options: { staged: boolean; hookOutput?: boolean }): Promise<void> {
