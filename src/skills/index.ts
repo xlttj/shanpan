@@ -106,12 +106,17 @@ the source of truth for that.
 
 ## Spec types
 
-| type | Use for |
-|------|---------|
-| \`intent\` | High-level goals and product decisions ("why we build this") |
-| \`business_rule\` | Domain constraints that must always hold ("must / must not / always") |
-| \`software_requirement\` | Concrete behaviour with acceptance criteria |
-| \`project_spec\` | Cross-cutting architecture or setup decisions |
+| type | Use for | Has \`acceptance_criteria\`? |
+|------|---------|---------------------------|
+| \`intent\` | High-level goals and product decisions ("why we build this") | No |
+| \`business_rule\` | Domain constraints that hold **at all times** — no trigger needed ("must / must not / always / SHALL NOT") | No — rules go in markdown body under \`## Rules\` |
+| \`software_requirement\` | Observable behaviour triggered by a specific event | Yes |
+| \`project_spec\` | Cross-cutting architecture or setup decisions | No |
+
+**Type decision rule**: If you find yourself writing \`given/when/then\` criteria — the type is
+\`software_requirement\`. A \`business_rule\` never has \`acceptance_criteria\`; its constraints
+hold at all times without a trigger to fire them. If the rule only applies *when something
+happens*, it is a \`software_requirement\` criterion, not a \`business_rule\`.
 
 ## Steps
 
@@ -126,10 +131,15 @@ the source of truth for that.
    The spec ID is derived from the path: \`orders/order-downgrade-scheduling\`.
    The file is created with \`status: draft\`.
 
-2. **Add acceptance criteria** — open the generated \`.md\` file and add
-   \`acceptance_criteria\` to the YAML frontmatter. Each entry is a single
-   \`{given, when, then}\` triple. See *Writing acceptance criteria precisely* below
-   for the rules on what goes in each field.
+2. **Add content to the spec body**:
+   - For \`software_requirement\`: add \`acceptance_criteria\` to the YAML frontmatter.
+     Each entry is a single \`{given, when, then}\` triple. See *Writing acceptance
+     criteria precisely* below for the rules on what goes in each field.
+   - For \`business_rule\`: add a \`## Rules\` heading to the markdown body and list
+     each rule as a bullet. Do **not** add \`acceptance_criteria\` to frontmatter —
+     business rules have no trigger; they hold unconditionally.
+   - For \`intent\`: write motivation and user benefit in the markdown body; no
+     \`acceptance_criteria\` or \`## Rules\` needed.
 
 3. **Link symbols if known**: pass \`symbols\` to \`create_spec\`, or add them later:
    \`\`\`
@@ -165,7 +175,9 @@ given: "a customer placing an order for an item with zero inventory"
 when:  "the order is submitted"
 then:  "the order is rejected with an out-of-stock error"
 \`\`\`
-If you wrote *if* or *when* inside \`then\`, a precondition leaked out of \`given\`.
+Signal words: if you write *if*, *when*, *unless*, *provided*, *assuming*, or *as long as*
+inside \`then\`, a precondition has leaked out of \`given\`. Move the clause to \`given\` and
+restate \`then\` as an unconditional outcome.
 
 **2. State in \`when\` (precondition leaking out of \`given\`)**
 
