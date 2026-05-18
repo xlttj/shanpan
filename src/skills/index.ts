@@ -127,15 +127,9 @@ the source of truth for that.
    The file is created with \`status: draft\`.
 
 2. **Add acceptance criteria** — open the generated \`.md\` file and add
-   \`acceptance_criteria\` to the YAML frontmatter. Each entry is a \`{given, when, then}\`
-   object. Merge multi-step Given/And into one string; same for When and Then:
-   \`\`\`yaml
-   acceptance_criteria:
-     - given: "a customer with an active Professional subscription not in a trial"
-       when: "they request a downgrade to Basic and confirm"
-       then: "the downgrade is scheduled for the next billing cycle and a confirmation email is sent"
-   \`\`\`
-   Write the body as a short prose description of what the code must do and why.
+   \`acceptance_criteria\` to the YAML frontmatter. Each entry is a single
+   \`{given, when, then}\` triple. See *Writing acceptance criteria precisely* below
+   for the rules on what goes in each field.
 
 3. **Link symbols if known**: pass \`symbols\` to \`create_spec\`, or add them later:
    \`\`\`
@@ -143,6 +137,85 @@ the source of truth for that.
    \`\`\`
 
 4. **Call \`reindex\`** so the graph reflects the new spec.
+
+## Writing acceptance criteria precisely
+
+The format is intentionally three single strings — no nested AND/OR fields — because
+it forces clarity about what is a precondition, what is a trigger, and what is an
+outcome. Most translation mistakes come from blurring these three.
+
+### What each field is
+
+- **\`given\`** — the complete precondition: actor state, system state, and any data
+  that must be true *before* the trigger fires. All "AND" preconditions stack into
+  this one string as prose.
+- **\`when\`** — the single triggering event or action. One verb, one initiator
+  (a user action, a scheduled job, an incoming message, a CLI invocation).
+- **\`then\`** — the observable, *unconditional* outcome the system produces. What
+  changes, what is returned, what is shown, what is recorded. Never conditional.
+
+### Three anti-patterns
+
+**1. Conditional \`then\` (precondition leaking out of \`given\`)**
+
+Bad: \`then: "the order is rejected if inventory is empty"\`
+Fix — move the condition up:
+\`\`\`yaml
+given: "a customer placing an order for an item with zero inventory"
+when:  "the order is submitted"
+then:  "the order is rejected with an out-of-stock error"
+\`\`\`
+If you wrote *if* or *when* inside \`then\`, a precondition leaked out of \`given\`.
+
+**2. State in \`when\` (precondition leaking out of \`given\`)**
+
+Bad: \`when: "the user is logged in and has admin rights"\`
+"Is logged in" is a state, not an event. Move to \`given\`; put the trigger in \`when\`.
+
+**3. Two events in one \`when\`**
+
+Bad: \`when: "the user clicks Submit and the server validates the input"\`
+Server validation is the system's response, which belongs in \`then\`. \`when\` is
+exactly one initiating action.
+
+### Handling AND / OR from the source
+
+- **AND preconditions** → merge into \`given\` as prose: *"a customer with an active
+  subscription **and** a verified email"*.
+- **AND outcomes** → merge into \`then\` as prose.
+- **OR preconditions, same outcome** → two criteria with identical \`then\` and
+  different \`given\`.
+- **OR producing different outcomes** → always two separate criteria.
+
+### Source-agnostic translation pattern
+
+Input may be a chat, a ticket, an existing spec file, an email thread, a test name,
+or behaviour inferred from code. The translation is always the same: **find the
+trigger; everything before it is \`given\`; everything after it is \`then\`.**
+
+- **Gherkin-style chains (WHEN X AND Y AND Z THEN W)** — only one of the X/Y/Z is
+  the real trigger (usually a user action or external event). The rest are
+  preconditions; push them into \`given\`.
+- **Ticket-style bullet lists** — read the bullets, identify the user/system action
+  in the list, put it in \`when\`, the surrounding context in \`given\`, the expected
+  result in \`then\`.
+- **Chat / conversation** — listen for *"when X happens, Y should…"* and *"but if Z,
+  then W"* branches. Each branch is a separate criterion.
+- **Existing code** — the entry point (HTTP handler, message handler, scheduled
+  job, CLI command) is the trigger. Inputs to it are \`given\`; side effects and
+  return values are \`then\`. Skip implementation steps in between.
+
+### Worked example
+
+A complete, well-shaped criterion:
+\`\`\`yaml
+acceptance_criteria:
+  - given: "a customer with an active Professional subscription not in a trial"
+    when:  "they request a downgrade to Basic"
+    then:  "the downgrade is scheduled for the next billing cycle and a confirmation email is sent"
+\`\`\`
+The \`given\` carries every precondition; the \`when\` is one user-initiated action;
+the \`then\` lists every observable outcome with no \`if\`/\`when\` qualifiers.
 
 ## One spec, one primary symbol
 
