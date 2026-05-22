@@ -140,6 +140,8 @@ happens*, it is a \`software_requirement\` criterion, not a \`business_rule\`.
      business rules have no trigger; they hold unconditionally.
    - For \`intent\`: write motivation and user benefit in the markdown body; no
      \`acceptance_criteria\` or \`## Rules\` needed.
+   - **Always write a meaningful body**, regardless of type. See *Spec body structure*
+     below for what to include.
 
 3. **Link symbols if known**: pass \`symbols\` to \`create_spec\`, or add them later:
    \`\`\`
@@ -147,6 +149,109 @@ happens*, it is a \`software_requirement\` criterion, not a \`business_rule\`.
    \`\`\`
 
 4. **Call \`reindex\`** so the graph reflects the new spec.
+
+## Spec body structure
+
+The frontmatter captures *what* the system must do. The body captures *why* —
+the domain reasoning, decisions, and context that explain those commitments. A
+spec body without rationale is a contract without reasoning: implementers can
+satisfy the letter while violating the intent.
+
+**Do not repeat the frontmatter in the body.** The body is not a prose restatement
+of \`acceptance_criteria\` or \`## Rules\`. It adds what the structured fields cannot.
+
+### software_requirement body
+
+\`\`\`markdown
+## Context
+
+[1–3 sentences: the domain situation or user need that makes this behaviour
+necessary. Why does this requirement exist? What breaks if it is absent?]
+
+## Decisions
+
+- **[Decision title]**: [Why this approach was chosen over the alternatives.
+  Relevant constraint, tradeoff, or domain fact that motivated the choice.]
+- ...
+
+## Out of scope
+
+- [Explicit exclusion — behaviour that is intentionally NOT covered and why]
+\`\`\`
+
+Rules for \`## Context\`: one paragraph, no implementation details, no column lists.
+It answers: *"What domain problem does this requirement solve?"*
+
+Rules for \`## Decisions\`: only include decisions that shaped the acceptance criteria
+directly — e.g. why the lookup uses 5 keys instead of 3, why NULL is treated as
+an error rather than a default, why priority ordering matters. Omit implementation
+choices (which class, which library, which SQL feature).
+
+Rules for \`## Out of scope\`: list behaviour that a reader might reasonably expect
+to be here but is not. Explicitly naming exclusions prevents scope creep.
+
+### business_rule body
+
+\`\`\`markdown
+## Rules
+
+- [Rule as an invariant — "must", "must not", "never", "always", "SHALL NOT"]
+
+## Rationale
+
+[Why this rule exists: regulatory requirement, domain invariant, contractual
+obligation, safety constraint, product decision. One sentence per rule if they
+have different reasons; one paragraph if they share a common motivation.]
+
+## Out of scope
+
+- [Situations the rule intentionally does not govern]
+\`\`\`
+
+Each rule bullet is a single unconditional statement. If you feel the need to add
+a qualification after the bullet, that qualification is either a separate rule or
+a \`software_requirement\` criterion — not a bullet modifier.
+
+The \`## Rationale\` is mandatory for \`business_rule\`. A rule without rationale
+cannot be challenged, revised, or retired correctly. "Why does this constraint
+exist?" must have an answer in the spec.
+
+### intent body
+
+\`\`\`markdown
+[Opening paragraph: the user need or system problem being addressed. Written from
+the user's perspective, not the system's.]
+
+## User benefit
+
+[Observable improvement for the user when this intent is fulfilled — not features,
+but outcomes. What can the user do or avoid that they could not before?]
+
+## Decisions
+
+- **[Scope or product decision]**: [Rationale — why this decision, not the alternative]
+
+## Out of scope
+
+- [Explicit product exclusion — adjacent problems intentionally deferred or delegated]
+\`\`\`
+
+### project_spec body
+
+\`\`\`markdown
+## Overview
+
+[What this cross-cutting concern governs and why it requires a dedicated spec
+rather than being captured in individual \`software_requirement\` specs.]
+
+## Decisions
+
+- **[Architectural or process decision]**: [Rationale]
+
+## Out of scope
+
+- [Systems or concerns explicitly not governed here]
+\`\`\`
 
 ## Writing acceptance criteria precisely
 
@@ -219,15 +324,51 @@ trigger; everything before it is \`given\`; everything after it is \`then\`.**
 
 ### Worked example
 
-A complete, well-shaped criterion:
+A complete spec with well-shaped acceptance criteria **and** a meaningful body:
+
+*Frontmatter:*
 \`\`\`yaml
+title: Order Downgrade Scheduling
+type: software_requirement
+status: draft
+implements:
+  - symbol: src/Orders/DowngradeService.php::DowngradeService.schedule
+    type: method
 acceptance_criteria:
   - given: "a customer with an active Professional subscription not in a trial"
     when:  "they request a downgrade to Basic"
     then:  "the downgrade is scheduled for the next billing cycle and a confirmation email is sent"
+  - given: "a customer already scheduled for a downgrade"
+    when:  "they request a second downgrade"
+    then:  "the request is rejected with 'downgrade already pending'"
 \`\`\`
+
+*Body:*
+\`\`\`markdown
+## Context
+
+Customers on Professional may downgrade to Basic, but immediate downgrades would
+cause partial-period refund complexity. Scheduling at billing-cycle boundary
+simplifies billing and prevents revenue leakage from same-day churn patterns.
+
+## Decisions
+
+- **Scheduled, not immediate**: downgrade takes effect at the next billing cycle
+  boundary rather than instantly, so no proration logic is required.
+- **One pending downgrade at a time**: a second request is rejected rather than
+  replacing the first, because replacing silently would allow a customer to change
+  their mind without customer support involvement, bypassing retention flow.
+
+## Out of scope
+
+- Cancellation of a pending downgrade (handled in order-downgrade-cancellation spec)
+- Upgrade from Basic back to Professional after a downgrade is scheduled
+\`\`\`
+
 The \`given\` carries every precondition; the \`when\` is one user-initiated action;
 the \`then\` lists every observable outcome with no \`if\`/\`when\` qualifiers.
+The body explains WHY these criteria are shaped this way — information the
+structured fields cannot express.
 
 ## One spec, one primary symbol
 
@@ -447,13 +588,17 @@ intent                       <- the "why" (one per feature, always required)
 One spec per architectural layer. Never put domain aggregate logic and UI behaviour in the same spec.
 
 Create each spec using \`create_spec\`, all with \`status: draft\`.
+After creation, open the file and write a full body — see *Spec body structure*
+in the \`create-spec\` skill for the per-type template.
 
-- \`intent\`: body = motivation and user benefit; no \`acceptance_criteria\`; add "## Out of scope" section
-- \`business_rule\`: rules go in the **markdown body** under a \`## Rules\` heading as a bullet list —
-  there is no \`rules:\` frontmatter field; the only valid frontmatter fields are
-  \`title\`, \`type\`, \`status\`, \`created\`, \`implements\`, \`acceptance_criteria\`, \`refs\`, \`defines_rules\`
-- \`software_requirement\`: add \`acceptance_criteria\` to the frontmatter:
+| type | Frontmatter fields | Required body sections |
+|------|--------------------|------------------------|
+| \`intent\` | \`title\`, \`type\`, \`status\` | Opening paragraph, \`## User benefit\`, \`## Decisions\`, \`## Out of scope\` |
+| \`business_rule\` | \`title\`, \`type\`, \`status\`, optionally \`implements\` | \`## Rules\`, \`## Rationale\`, \`## Out of scope\` |
+| \`software_requirement\` | \`title\`, \`type\`, \`status\`, \`implements\`, \`acceptance_criteria\` | \`## Context\`, \`## Decisions\`, \`## Out of scope\` |
+| \`project_spec\` | \`title\`, \`type\`, \`status\` | \`## Overview\`, \`## Decisions\`, \`## Out of scope\` |
 
+\`acceptance_criteria\` frontmatter format:
 \`\`\`yaml
 acceptance_criteria:
   - given: "specific, concrete precondition"
