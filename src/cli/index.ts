@@ -9,6 +9,7 @@ import { runCreate } from './commands/create.js';
 import { runUpdate } from './commands/update.js';
 import { runCheck } from './commands/check.js';
 import { runUpgrade } from './commands/upgrade.js';
+import { runContext } from './commands/context.js';
 
 const program = new Command();
 
@@ -113,6 +114,11 @@ program
   .option('--staged', 'Check staged git changes for symbol deletions/renames')
   .option('--hook-output', 'Output JSON for use in IDE Stop hooks')
   .action((opts) => runCheck({ staged: !!opts.staged, hookOutput: !!opts.hookOutput }));
+
+program
+  .command('context')
+  .description('Output spec context for a file (reads Claude Code PreToolUse hook JSON from stdin)')
+  .action(() => runContext());
 
 // process.exit() prevents V8 from running GC finalizers in an unspecified
 // order after the command completes. Without this, the simultaneous presence

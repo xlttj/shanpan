@@ -11,6 +11,19 @@ export interface IdeIntegration {
 
 const HOOKS_CONFIG = {
   hooks: {
+    PreToolUse: [
+      {
+        matcher: 'Write|Edit|MultiEdit',
+        hooks: [
+          {
+            type: 'command',
+            // Reads hook JSON from stdin, outputs spec context for the file being edited.
+            // Outputs nothing (allow passthrough) when the file has no linked specs.
+            command: 'specgraph context',
+          },
+        ],
+      },
+    ],
     PostToolUse: [
       {
         matcher: 'Write|Edit|MultiEdit',

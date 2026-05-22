@@ -26,13 +26,17 @@ Follow this loop for every coding task. Do not skip steps.
 
 ### Before the first edit
 
-1. Identify the symbols you are about to touch (function, class, SQL object, file).
-2. Call \`get_specs_for_symbol_with_context\` for each. Read the \`acceptance_criteria\`
-   and \`## Rules\` sections in the returned specs.
-3. If no specs exist for the affected symbols, note that and continue — absence of
+1. **If the IDE injected a `[specgraph]` message** listing specs for the file you are
+   about to edit — read it now. That is the spec context for this edit, pre-loaded by
+   the PreToolUse hook. Call \`get_spec\` on any listed spec to read the full criteria.
+2. **If no `[specgraph]` message appeared** (hook not configured, file not yet indexed,
+   or no specs exist for this file): call \`get_specs_for_symbol_with_context\` for the
+   symbol(s) you are about to touch, or \`search_symbols\` if the symbol path is unknown.
+3. Read the \`acceptance_criteria\` and \`## Rules\` sections of any returned specs.
+4. If no specs exist for the affected symbols, note that and continue — absence of
    specs is not permission to ignore the area. Use \`get_unspecced_symbols\` to confirm
    the symbol is genuinely unspecced rather than linked under a different ID.
-4. If a spec's acceptance criteria would be *violated* by what you are about to
+5. If a spec's acceptance criteria would be *violated* by what you are about to
    implement, **stop and surface the conflict to the user** before writing any code.
    Do not silently implement something that contradicts a spec — the spec is the
    contract. Ask: "This would break criterion X in spec Y. Should we update the spec,
