@@ -20,6 +20,57 @@ Before implementing a feature or modifying code, identify the specs that govern 
 - When asked to implement a feature — find existing intent and business rule specs first
 - When a symbol name or file path is known and you want to know what it must satisfy
 
+## Coding workflow
+
+Follow this loop for every coding task. Do not skip steps.
+
+### Before the first edit
+
+1. Identify the symbols you are about to touch (function, class, SQL object, file).
+2. Call \`get_specs_for_symbol_with_context\` for each. Read the \`acceptance_criteria\`
+   and \`## Rules\` sections in the returned specs.
+3. If no specs exist for the affected symbols, note that and continue — absence of
+   specs is not permission to ignore the area. Use \`get_unspecced_symbols\` to confirm
+   the symbol is genuinely unspecced rather than linked under a different ID.
+4. If a spec's acceptance criteria would be *violated* by what you are about to
+   implement, **stop and surface the conflict to the user** before writing any code.
+   Do not silently implement something that contradicts a spec — the spec is the
+   contract. Ask: "This would break criterion X in spec Y. Should we update the spec,
+   change the approach, or accept the deviation?"
+
+### During implementation
+
+5. If you discover during coding that a spec is *incomplete* — it does not cover a
+   case you are implementing — note it. Do not expand the spec silently; flag it to
+   the user: "The spec doesn't cover this edge case. Should I add a criterion, or is
+   this behaviour intentionally unspecced?"
+
+### After coding
+
+6. Once the implementation is done, compare what you built against the acceptance
+   criteria and rules you read in step 2. Ask yourself:
+   - Did any criterion change in meaning (even if the symbol still exists)?
+   - Did you make a decision during implementation that the spec's \`## Decisions\`
+     section should record?
+   - Did you discover something about the domain that is not captured anywhere?
+7. If yes to any of the above: update the spec **in the same session** before
+   closing the task. Use \`update_spec\` for symbol links; edit the file directly
+   for body content (criteria, decisions, context).
+8. Run \`reindex\` after any spec edit.
+
+### Capturing chat insights
+
+New requirements, constraints, and decisions often emerge during the conversation
+between user and agent — not from code, but from clarifying questions and answers.
+These are spec material. At the end of a coding session:
+
+- Scan the conversation for statements like "actually it should always…",
+  "we decided not to…", "this only applies when…", or "the reason for this is…"
+- If any of these are behavioural commitments not yet in a spec, offer to create or
+  update the relevant spec. Do not assume the user will remember to do it later.
+  Concrete prompt: "During this session we established that [X]. Should I add this
+  to spec [Y] under \`## Decisions\` / as a new criterion / as a business rule?"
+
 ## Steps
 
 1. **Find specs for a known symbol**: call \`get_specs_for_symbol_with_context\` with the symbol's fully-qualified ID (\`filePath::fqn\`, e.g. \`src/core/parser.ts::parseSpecFile\`). This returns specs for the symbol, its class hierarchy, its file, and its 1-hop call-graph neighbours — all in one call.
@@ -632,6 +683,23 @@ codebase — the spec and the code have diverged. Surfacing drift is specgraph's
 job. Resolving it (update the spec, revert the code, or retire the spec) is the
 user's decision.
 
+## Two kinds of drift
+
+**Hard drift** — the symbol the spec links to no longer exists. Detected automatically
+by \`get_drift_report\`. The Stop hook reports new instances at the end of each turn.
+
+**Soft drift** — the symbol still exists, but its behaviour no longer matches the spec.
+Not detected automatically. You must recognise it:
+- You implemented something that satisfies the code but violates an acceptance criterion
+- You changed the semantics of a symbol (return value, error handling, precondition)
+  without touching the spec
+- A decision was made during the session that contradicts what \`## Decisions\` says
+- User confirmed during chat that a rule or criterion is wrong or outdated
+
+Soft drift is silent — no hook fires, no drift report shows it. **You** are the detector.
+When you notice it, do not continue without flagging it to the user and offering to
+update the spec.
+
 ## Run the drift report
 
 \`\`\`
@@ -680,6 +748,39 @@ to link remaining drafts is a product decision, not a specgraph concern.
 - When \`specgraph analyze\` reports drift warnings in its output
 - When onboarding to a codebase to understand which specs are linked vs unlinked
 - After a batch of spec creation to verify all \`implements\` entries resolved
+- **At the end of any coding session** — see below
+
+## End-of-session spec review
+
+At the end of a session where code was written or modified, actively review whether
+specs need updating. Do not wait for the user to ask. Go through this checklist:
+
+**Hard drift** (run automatically):
+\`\`\`
+get_drift_report()
+\`\`\`
+If any broken links exist, surface them to the user.
+
+**Soft drift** (manual — you must check this yourself):
+- Read back the specs for every symbol you modified this session
+  (\`get_specs_for_symbol_with_context\`)
+- Compare: does what you implemented match the \`acceptance_criteria\`?
+- If a criterion no longer describes actual behaviour: flag it and offer to update
+
+**Chat insights** (scan the conversation):
+Look for statements made during the session that represent new behavioural commitments:
+- "Actually, it should always…" → candidate for a new rule or criterion
+- "We decided not to…" → candidate for \`## Out of scope\` or a business rule
+- "The reason for this is…" → candidate for \`## Rationale\` or \`## Context\`
+- "This only applies when…" → candidate for a new \`given\` or a \`business_rule\`
+- "We changed our mind about…" → an existing criterion or decision may be stale
+
+For each candidate: offer to update the relevant spec. Concrete prompt:
+"During this session we established that [X]. Should I add this to
+[spec ID] under [## Decisions / ## Rationale / as a new criterion]?"
+
+Never silently discard an insight because it feels minor. The user decides
+what is worth capturing; your job is to surface it.
 
 ## Stop-hook drift warnings
 
