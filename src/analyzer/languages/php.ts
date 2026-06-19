@@ -82,7 +82,8 @@ function walkNode(
   if (
     node.type === 'program' ||
     node.type === 'declaration_list' ||
-    node.type === 'compound_statement'
+    node.type === 'compound_statement' ||
+    node.type === 'namespace_definition'
   ) {
     for (const child of node.children) {
       walkNode(child, filePath, parentFqn, results);

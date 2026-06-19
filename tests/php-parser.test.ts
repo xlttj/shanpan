@@ -55,6 +55,35 @@ describe('PhpParser', () => {
     expect(cls?.lineStart).toBe(3);
   });
 
+  it('extracts static methods (EasyAdmin getEntityFqcn pattern)', () => {
+    const source = `<?php
+namespace App\\Controller\\Admin;
+class TypeTransformationCrudController extends AbstractCrudController
+{
+    public static function getEntityFqcn(): string
+    {
+        return TypeTransformation::class;
+    }
+}
+`;
+    const symbols = parser.extractSymbols('src/Controller.php', source);
+    expect(symbols.some((s) => s.fqn === 'TypeTransformationCrudController' && s.kind === 'class')).toBe(true);
+    expect(symbols.some((s) => s.fqn === 'TypeTransformationCrudController.getEntityFqcn' && s.kind === 'method')).toBe(true);
+  });
+
+  it('extracts classes inside braced namespaces', () => {
+    const source = `<?php
+namespace App\\Models {
+    class Order {
+        public function total(): float { return 0.0; }
+    }
+}
+`;
+    const symbols = parser.extractSymbols('src/Order.php', source);
+    expect(symbols.some((s) => s.fqn === 'Order' && s.kind === 'class')).toBe(true);
+    expect(symbols.some((s) => s.fqn === 'Order.total' && s.kind === 'method')).toBe(true);
+  });
+
   it('parses the sample fixture without errors', () => {
     const source = fs.readFileSync(FIXTURE, 'utf-8');
     const symbols = parser.extractSymbols('tests/fixtures/sample.php', source);

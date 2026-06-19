@@ -26,10 +26,10 @@ Follow this loop for every coding task. Do not skip steps.
 
 ### Before the first edit
 
-1. **If the IDE injected a `[specgraph]` message** listing specs for the file you are
+1. **If the IDE injected a "[specgraph]" message** listing specs for the file you are
    about to edit — read it now. That is the spec context for this edit, pre-loaded by
    the PreToolUse hook. Call \`get_spec\` on any listed spec to read the full criteria.
-2. **If no `[specgraph]` message appeared** (hook not configured, file not yet indexed,
+2. **If no "[specgraph]" message appeared** (hook not configured, file not yet indexed,
    or no specs exist for this file): call \`get_specs_for_symbol_with_context\` for the
    symbol(s) you are about to touch, or \`search_symbols\` if the symbol path is unknown.
 3. Read the \`acceptance_criteria\` and \`## Rules\` sections of any returned specs.
