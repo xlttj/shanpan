@@ -16,6 +16,7 @@ export interface SpecFrontmatter {
   priority?: string;
   author?: string;
   created?: string | Date;
+  archived?: string | Date;
   defines_rules?: string[];
   implements?: ImplementsEntry[];
   acceptance_criteria?: GivenWhenThen[];

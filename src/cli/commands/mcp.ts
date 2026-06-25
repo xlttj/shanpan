@@ -564,6 +564,18 @@ export async function runMcp(options: { projectDir?: string } = {}): Promise<voi
         },
       },
       {
+        name: 'get_unlinked_specs',
+        description:
+          'List specs that have no implements entries — specs not yet linked to any code symbol.',
+        inputSchema: { type: 'object', properties: {} },
+      },
+      {
+        name: 'get_multi_spec_symbols',
+        description:
+          'List code symbols that are linked to more than one spec via IMPLEMENTS. Useful for spotting overlapping specs or intentional shared implementations.',
+        inputSchema: { type: 'object', properties: {} },
+      },
+      {
         name: 'get_specs_for_symbol_with_context',
         description:
           'Get specs for a symbol AND its containing class/file hierarchy AND its 1-hop call-graph neighbours. Returns results grouped by scope (symbol, parent, class, file, callers, callees), with empty scopes omitted. Callers/callees entries include a viaSymbolId field showing which neighbour linked the spec.',
@@ -759,6 +771,38 @@ export async function runMcp(options: { projectDir?: string } = {}): Promise<voi
         return textResult(`Updated ${path.relative(projectDir, filePath)}`);
       } catch (err) {
         return textResult(`Error: ${(err as Error).message}`);
+      }
+    }
+
+    if (name === 'get_unlinked_specs') {
+      const { db, conn } = await openDatabase(projectDir, true);
+      try {
+        const { rows } = await queryAll(
+          conn,
+          `MATCH (s:Spec) WHERE NOT EXISTS { MATCH ()-[:IMPLEMENTS]->(s) }
+           RETURN s.id AS id, s.title AS title, s.type AS type, s.status AS status
+           ORDER BY s.id`,
+        );
+        return jsonResult(rows);
+      } finally {
+        await closeDatabase(db, conn);
+      }
+    }
+
+    if (name === 'get_multi_spec_symbols') {
+      const { db, conn } = await openDatabase(projectDir, true);
+      try {
+        const { rows } = await queryAll(
+          conn,
+          `MATCH (c:CodeSymbol)-[:IMPLEMENTS]->(s:Spec)
+           WITH c, collect({id: s.id, title: s.title, type: s.type}) AS specs
+           WHERE size(specs) > 1
+           RETURN c.id AS symbolId, c.fqn AS fqn, c.file_path AS filePath, specs
+           ORDER BY c.id`,
+        );
+        return jsonResult(rows);
+      } finally {
+        await closeDatabase(db, conn);
       }
     }
 

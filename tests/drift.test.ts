@@ -2,7 +2,9 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
-import { driftKey, loadDriftCache, saveDriftCache } from '../src/core/drift.js';
+import { computeDrift, driftKey, loadDriftCache, saveDriftCache } from '../src/core/drift.js';
+import { openDatabase, closeDatabase } from '../src/core/db.js';
+import { indexSpecs } from '../src/core/indexer.js';
 
 let tmpDir: string;
 
@@ -79,5 +81,31 @@ describe('drift cache (loop prevention)', () => {
     const cached2 = loadDriftCache(tmpDir);
     const new2 = drift.filter((d) => !cached2.has(driftKey(d)));
     expect(new2).toHaveLength(0);
+  });
+});
+
+describe('computeDrift', () => {
+  it('skips archived specs', async () => {
+    const specsDir = path.join(tmpDir, 'specs');
+    fs.mkdirSync(specsDir, { recursive: true });
+    fs.writeFileSync(path.join(tmpDir, 'specgraph.yaml'), `specsDir: specs\n`);
+    fs.writeFileSync(
+      path.join(specsDir, 'archived-spec.md'),
+      `---\ntitle: Old\ntype: business_rule\nstatus: archived\narchived: '2026-06-22'\nimplements:\n  - symbol: src/gone.ts::Gone\n    type: class\n---\n`,
+    );
+    fs.writeFileSync(
+      path.join(specsDir, 'active-spec.md'),
+      `---\ntitle: Active\ntype: intent\nstatus: active\nimplements:\n  - symbol: src/also-gone.ts::AlsoGone\n    type: class\n---\n`,
+    );
+    const { db, conn } = await openDatabase(tmpDir);
+    try {
+      await indexSpecs(conn, []);
+      const drift = await computeDrift(conn, tmpDir);
+      const specIds = drift.map((d) => d.specId);
+      expect(specIds).not.toContain('archived-spec');
+      expect(specIds).toContain('active-spec');
+    } finally {
+      await closeDatabase(db, conn);
+    }
   });
 });

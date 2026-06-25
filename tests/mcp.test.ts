@@ -234,6 +234,102 @@ describe('get_unspecced_symbols tool logic', () => {
   });
 });
 
+// ─── get_unlinked_specs tool logic ───────────────────────────────────────────
+
+describe('get_unlinked_specs tool logic', () => {
+  let db: Database;
+  let conn: Connection;
+  let dbDir: string;
+
+  beforeEach(async () => {
+    dbDir = fs.mkdtempSync(path.join(os.tmpdir(), 'specgraph-unlinked-'));
+    fs.mkdirSync(path.join(dbDir, '.specgraph'), { recursive: true });
+    ({ db, conn } = await openDatabase(dbDir));
+  });
+
+  afterEach(async () => {
+    await closeDatabase(db, conn);
+    fs.rmSync(dbDir, { recursive: true, force: true });
+  });
+
+  it('returns specs with no IMPLEMENTS edges', async () => {
+    await indexSpecs(conn, [
+      { id: 'linked', frontmatter: { title: 'Linked', type: 'intent', status: 'active', implements: [{ symbol: 'src/a.ts::Foo', type: 'class' }] }, content: '', filePath: '/fake/linked.md' },
+      { id: 'orphan', frontmatter: { title: 'Orphan', type: 'intent', status: 'draft' }, content: '', filePath: '/fake/orphan.md' },
+    ]);
+    const { queryAll: qa } = await import('../src/core/db.js');
+    const { rows } = await qa(conn,
+      `MATCH (s:Spec) WHERE NOT EXISTS { MATCH ()-[:IMPLEMENTS]->(s) }
+       RETURN s.id AS id ORDER BY s.id`,
+    );
+    expect(rows.map((r) => r['id'])).toEqual(['orphan']);
+  });
+
+  it('returns empty when all specs have links', async () => {
+    await indexSpecs(conn, [
+      { id: 'linked', frontmatter: { title: 'Linked', type: 'intent', status: 'active', implements: [{ symbol: 'src/a.ts::Foo', type: 'class' }] }, content: '', filePath: '/fake/linked.md' },
+    ]);
+    const { queryAll: qa } = await import('../src/core/db.js');
+    const { rows } = await qa(conn,
+      `MATCH (s:Spec) WHERE NOT EXISTS { MATCH ()-[:IMPLEMENTS]->(s) }
+       RETURN s.id AS id`,
+    );
+    expect(rows).toHaveLength(0);
+  });
+});
+
+// ─── get_multi_spec_symbols tool logic ──────────────────────────────────────
+
+describe('get_multi_spec_symbols tool logic', () => {
+  let db: Database;
+  let conn: Connection;
+  let dbDir: string;
+
+  beforeEach(async () => {
+    dbDir = fs.mkdtempSync(path.join(os.tmpdir(), 'specgraph-multi-'));
+    fs.mkdirSync(path.join(dbDir, '.specgraph'), { recursive: true });
+    ({ db, conn } = await openDatabase(dbDir));
+  });
+
+  afterEach(async () => {
+    await closeDatabase(db, conn);
+    fs.rmSync(dbDir, { recursive: true, force: true });
+  });
+
+  it('returns symbols linked to multiple specs', async () => {
+    await indexSpecs(conn, [
+      { id: 'S1', frontmatter: { title: 'S1', type: 'intent', status: 'active', implements: [{ symbol: 'src/a.ts::Shared', type: 'class' }] }, content: '', filePath: '/fake/s1.md' },
+      { id: 'S2', frontmatter: { title: 'S2', type: 'intent', status: 'active', implements: [{ symbol: 'src/a.ts::Shared', type: 'class' }] }, content: '', filePath: '/fake/s2.md' },
+      { id: 'S3', frontmatter: { title: 'S3', type: 'intent', status: 'active', implements: [{ symbol: 'src/b.ts::Solo', type: 'class' }] }, content: '', filePath: '/fake/s3.md' },
+    ]);
+    const { queryAll: qa } = await import('../src/core/db.js');
+    const { rows } = await qa(conn,
+      `MATCH (c:CodeSymbol)-[:IMPLEMENTS]->(s:Spec)
+       WITH c, collect({id: s.id, title: s.title, type: s.type}) AS specs
+       WHERE size(specs) > 1
+       RETURN c.id AS symbolId, specs
+       ORDER BY c.id`,
+    );
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.['symbolId']).toBe('src/a.ts::Shared');
+  });
+
+  it('returns empty when no symbol links to multiple specs', async () => {
+    await indexSpecs(conn, [
+      { id: 'S1', frontmatter: { title: 'S1', type: 'intent', status: 'active', implements: [{ symbol: 'src/a.ts::A', type: 'class' }] }, content: '', filePath: '/fake/s1.md' },
+      { id: 'S2', frontmatter: { title: 'S2', type: 'intent', status: 'active', implements: [{ symbol: 'src/b.ts::B', type: 'class' }] }, content: '', filePath: '/fake/s2.md' },
+    ]);
+    const { queryAll: qa } = await import('../src/core/db.js');
+    const { rows } = await qa(conn,
+      `MATCH (c:CodeSymbol)-[:IMPLEMENTS]->(s:Spec)
+       WITH c, collect({id: s.id, title: s.title, type: s.type}) AS specs
+       WHERE size(specs) > 1
+       RETURN c.id AS symbolId`,
+    );
+    expect(rows).toHaveLength(0);
+  });
+});
+
 // ─── reindex logic ────────────────────────────────────────────────────────────
 
 describe('reindex tool logic', () => {

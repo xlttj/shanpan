@@ -5,7 +5,7 @@ import type { ParsedSpec, SpecFrontmatter } from '../types/spec.js';
 
 const KNOWN_FRONTMATTER_KEYS = new Set([
   'title', 'type', 'status', 'created', 'priority', 'author',
-  'defines_rules', 'implements', 'acceptance_criteria', 'refs',
+  'archived', 'defines_rules', 'implements', 'acceptance_criteria', 'refs',
 ]);
 
 export function parseSpecFile(

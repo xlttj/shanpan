@@ -148,6 +148,18 @@ refs:
     expect(warnings).toHaveLength(0);
   });
 
+  it('archived field does not trigger unknown field warning', () => {
+    writeSpec('archived-spec.md', `---
+title: "Old Feature"
+type: business_rule
+status: archived
+archived: '2026-06-22'
+---
+`);
+    const { warnings } = parseAllSpecs(tmpDir);
+    expect(warnings).toHaveLength(0);
+  });
+
   it('onWarning callback fires for unknown fields in parseSpecFile', () => {
     const filePath = writeSpec('spec.md', `---
 title: "Test"
