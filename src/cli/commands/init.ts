@@ -10,17 +10,41 @@ import { IDE_INTEGRATIONS, installIdeHooks, type IdeIntegration } from '../../co
 
 const SKILL_CLIENT_DIRS = ['.claude', '.cursor', '.opencode'] as const;
 
+// Appended to every generated SKILL.md. Lets a later run recognise which skill
+// directories specgraph itself owns, so it can prune ones it no longer ships
+// without ever touching a skill the user wrote by hand.
+const OWNERSHIP_MARKER = '<!-- specgraph-managed-skill -->';
+
+/** Delete specgraph-owned skill directories that are no longer in SKILLS. */
+function pruneStaleSkills(skillsBase: string, current: Set<string>): void {
+  if (!fs.existsSync(skillsBase)) return;
+  for (const entry of fs.readdirSync(skillsBase, { withFileTypes: true })) {
+    if (!entry.isDirectory() || current.has(entry.name)) continue;
+    const skillFile = path.join(skillsBase, entry.name, 'SKILL.md');
+    let owned = false;
+    try {
+      owned = fs.readFileSync(skillFile, 'utf-8').includes(OWNERSHIP_MARKER);
+    } catch {
+      // No readable SKILL.md — not ours, leave it alone.
+    }
+    if (owned) fs.rmSync(path.join(skillsBase, entry.name), { recursive: true, force: true });
+  }
+}
+
 export function writeSkills(projectDir: string): string[] {
   const written: string[] = [];
+  const currentNames = new Set(SKILLS.map((s) => s.name));
   for (const clientDir of SKILL_CLIENT_DIRS) {
     const clientPath = path.join(projectDir, clientDir);
     // Always write to .claude/; only write to others if the client dir already exists
     if (clientDir !== '.claude' && !fs.existsSync(clientPath)) continue;
     const skillsBase = path.join(clientPath, 'skills');
+    pruneStaleSkills(skillsBase, currentNames);
     for (const skill of SKILLS) {
       const skillDir = path.join(skillsBase, skill.name);
       fs.mkdirSync(skillDir, { recursive: true });
-      fs.writeFileSync(path.join(skillDir, 'SKILL.md'), skill.content, 'utf-8');
+      const content = `${skill.content.trimEnd()}\n\n${OWNERSHIP_MARKER}\n`;
+      fs.writeFileSync(path.join(skillDir, 'SKILL.md'), content, 'utf-8');
     }
     written.push(path.join(clientDir, 'skills'));
   }
