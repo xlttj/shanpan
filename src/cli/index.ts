@@ -7,6 +7,7 @@ import { runAnalyze } from './commands/analyze.js';
 import { runCheck } from './commands/check.js';
 import { runUpgrade } from './commands/upgrade.js';
 import { runContext } from './commands/context.js';
+import { runBootstrap } from './commands/bootstrap.js';
 import { runRecordsIndex, runRecordsCheck, runRecordsAdd } from './commands/records.js';
 import { RECORD_KINDS } from '../types/record.js';
 
@@ -73,6 +74,18 @@ program
   .command('context')
   .description('Output knowledge for a file (reads Claude Code PreToolUse hook JSON from stdin)')
   .action(() => runContext());
+
+program
+  .command('bootstrap')
+  .description('Seed knowledge records from an existing codebase (marker comments, git reverts, ADR docs)')
+  .option('--dry-run', 'Show what would be added without writing')
+  .option('--commit-limit <n>', 'How many recent commits to scan for reverts (default 2000)', (v) => parseInt(v, 10))
+  .action((opts) =>
+    runBootstrap({
+      dryRun: !!opts.dryRun,
+      commitLimit: typeof opts.commitLimit === 'number' && !Number.isNaN(opts.commitLimit) ? opts.commitLimit : undefined,
+    }),
+  );
 
 const records = program
   .command('records')

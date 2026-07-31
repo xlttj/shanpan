@@ -53,7 +53,7 @@ export async function runRecordsIndex(): Promise<void> {
     const cleared = await conn.query('MATCH (r:Record) DETACH DELETE r');
     if (!Array.isArray(cleared)) cleared.close();
 
-    const stats = await indexRecords(conn, records);
+    const stats = await indexRecords(conn, records, projectDir);
     console.log(
       chalk.green(
         `✓ Indexed ${stats.records} record(s): ${stats.live} live, ` +
