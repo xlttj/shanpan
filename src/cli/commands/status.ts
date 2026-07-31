@@ -1,6 +1,6 @@
 import chalk from 'chalk';
 import { openDatabase, closeDatabase, dbExists } from '../../core/db.js';
-import { getGraphStats } from '../../core/indexer.js';
+import { getGraphStats } from '../../core/stats.js';
 
 export async function runStatus(): Promise<void> {
   const projectDir = process.cwd();
@@ -20,9 +20,12 @@ export async function runStatus(): Promise<void> {
     console.log(chalk.gray('─'.repeat(40)));
     console.log('');
     console.log(chalk.bold('Nodes'));
-    console.log(`  ${chalk.cyan('Specs')}         ${chalk.white(stats.specs)}`);
-    console.log(`  ${chalk.cyan('Business Rules')} ${chalk.white(stats.rules)}`);
     console.log(`  ${chalk.cyan('Code Symbols')}  ${chalk.white(stats.symbols)}`);
+    console.log(`  ${chalk.cyan('Files')}         ${chalk.white(stats.files)}`);
+    console.log(
+      `  ${chalk.cyan('Records')}       ${chalk.white(stats.records)}` +
+        chalk.gray(` (${stats.liveRecords} live)`),
+    );
     console.log('');
     console.log(chalk.bold('Edges'));
     for (const [type, count] of Object.entries(stats.edges)) {
@@ -36,7 +39,7 @@ export async function runStatus(): Promise<void> {
     console.log('');
     console.log(
       chalk.gray(
-        `Total: ${stats.specs + stats.rules + stats.symbols} nodes, ${totalEdges} edges`,
+        `Total: ${stats.symbols + stats.files + stats.records} nodes, ${totalEdges} edges`,
       ),
     );
   } finally {

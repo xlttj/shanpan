@@ -72,7 +72,7 @@ export async function promptIdeSelection(projectDir: string): Promise<IdeIntegra
   });
 }
 
-export async function runInit(options: { specsDir?: string }): Promise<void> {
+export async function runInit(): Promise<void> {
   const projectDir = process.cwd();
   const dbPath = getDbPath(projectDir);
 
@@ -82,11 +82,6 @@ export async function runInit(options: { specsDir?: string }): Promise<void> {
     return;
   }
 
-  const specsDir = path.resolve(projectDir, options.specsDir ?? 'specs');
-  if (!fs.existsSync(specsDir)) {
-    fs.mkdirSync(specsDir, { recursive: true });
-    console.log(chalk.gray(`Created specs directory: ${path.relative(projectDir, specsDir)}/`));
-  }
 
   console.log(chalk.cyan('Initializing SpecGraph…'));
 
@@ -98,7 +93,6 @@ export async function runInit(options: { specsDir?: string }): Promise<void> {
   const rcExists = fs.existsSync(rcPath);
   if (!rcExists) {
     const config = structuredClone(DEFAULT_CONFIG);
-    config.specsDir = path.relative(projectDir, specsDir);
     saveConfig(projectDir, config);
   }
 
@@ -112,7 +106,6 @@ export async function runInit(options: { specsDir?: string }): Promise<void> {
   } else {
     console.log(chalk.green(`✓ Created ${RC_FILE} with default settings`));
   }
-  console.log(chalk.green(`✓ Specs directory ready at ${path.relative(projectDir, specsDir)}/`));
   for (const dir of skillDirs) {
     console.log(chalk.green(`✓ Wrote agent skills to ${dir}/`));
   }

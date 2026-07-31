@@ -1,22 +1,4 @@
 export const SCHEMA_STATEMENTS = [
-  `CREATE NODE TABLE Spec (
-    id STRING PRIMARY KEY,
-    title STRING,
-    type STRING,
-    status STRING,
-    priority STRING,
-    author STRING,
-    created DATE,
-    description STRING,
-    acceptance_criteria STRING
-  )`,
-  `CREATE NODE TABLE BusinessRule (
-    id STRING PRIMARY KEY,
-    title STRING,
-    type STRING,
-    status STRING,
-    description STRING
-  )`,
   `CREATE NODE TABLE CodeSymbol (
     id STRING PRIMARY KEY,
     fqn STRING,
@@ -31,24 +13,6 @@ export const SCHEMA_STATEMENTS = [
     path STRING,
     ext  STRING,
     kind STRING
-  )`,
-  `CREATE NODE TABLE Ref (
-    id STRING PRIMARY KEY
-  )`,
-  `CREATE REL TABLE REFERENCES (FROM Spec TO Ref)`,
-  `CREATE REL TABLE DEFINES (FROM Spec TO BusinessRule)`,
-  `CREATE REL TABLE GROUP CONSTRAINS (
-    FROM BusinessRule TO Spec,
-    FROM BusinessRule TO BusinessRule
-  )`,
-  `CREATE REL TABLE GROUP IMPLEMENTS (
-    FROM CodeSymbol TO Spec,
-    FROM CodeSymbol TO BusinessRule,
-    FROM File TO Spec,
-    FROM File TO BusinessRule,
-    confidence FLOAT DEFAULT 1.0,
-    verified_at TIMESTAMP,
-    verified_by STRING
   )`,
   `CREATE REL TABLE GROUP CONTAINS (
     FROM File TO CodeSymbol,
@@ -87,8 +51,7 @@ export const SCHEMA_STATEMENTS = [
  * new tables instead of needing a full rebuild.
  */
 export const SCHEMA_TABLE_NAMES = [
-  'Spec', 'BusinessRule', 'CodeSymbol', 'File', 'Ref',
-  'REFERENCES', 'DEFINES', 'CONSTRAINS', 'IMPLEMENTS', 'CONTAINS', 'CALLS',
+  'CodeSymbol', 'File', 'CONTAINS', 'CALLS',
   'Record', 'ABOUT', 'SUPERSEDES',
 ];
 
@@ -97,15 +60,24 @@ export const DROP_ORDER = [
   'SUPERSEDES',
   'ABOUT',
   'CALLS',
-  'IMPLEMENTS',
   'CONTAINS',
-  'CONSTRAINS',
-  'DEFINES',
-  'REFERENCES',
   'Record',
   'CodeSymbol',
+  'File',
+];
+
+/**
+ * Node and relationship tables written by earlier, spec-based versions.
+ * Dropped on open so an existing database sheds them instead of carrying
+ * dead tables forever. Edges first — Kuzu refuses to drop a node table that
+ * still has relationships attached.
+ */
+export const LEGACY_TABLES = [
+  'IMPLEMENTS',
+  'DEFINES',
+  'CONSTRAINS',
+  'REFERENCES',
+  'Spec',
   'BusinessRule',
   'Ref',
-  'Spec',
-  'File',
 ];

@@ -1,15 +1,24 @@
 import chalk from 'chalk';
 import fs from 'node:fs';
 import path from 'node:path';
-import { openDatabase, closeDatabase, dbExists } from '../../core/db.js';
+import { openDatabase, closeDatabase, dbExists, queryAll } from '../../core/db.js';
 import { loadConfig, saveConfig } from '../../core/config.js';
-import { parseAllSpecs } from '../../core/parser.js';
 import { analyzeAndIndex, analyzeAndIndexIncremental } from '../../analyzer/indexer.js';
 import { walkFiles } from '../../analyzer/walker.js';
 import { getExtensionsForLanguages } from '../../analyzer/languages/index.js';
 import { loadAnalyzeState, saveAnalyzeState } from '../../core/analyze-state.js';
 import { watchAndReindex } from '../../core/watcher.js';
 import type { SpecGraphConfig } from '../../types/config.js';
+
+/** True when the graph holds no code symbols, whatever the state cache claims. */
+async function isGraphEmpty(conn: Parameters<typeof queryAll>[0]): Promise<boolean> {
+  try {
+    const { rows } = await queryAll(conn, 'MATCH (c:CodeSymbol) RETURN count(c) AS cnt');
+    return Number(rows[0]?.['cnt'] ?? 0) === 0;
+  } catch {
+    return false;
+  }
+}
 
 function makeProgressCallback(verbose: boolean) {
   if (!verbose || !process.stdout.isTTY) return undefined;
@@ -40,33 +49,11 @@ function printResults(
   console.log('');
   console.log(chalk.bold('Results:'));
   console.log(`  ${chalk.cyan('Files scanned')}         ${stats.filesScanned}`);
-  console.log(`  ${chalk.cyan('Symbols found')}         ${stats.symbolsFound}`);
-  console.log(`  ${chalk.cyan('Implementations linked')} ${stats.implementationsLinked}`);
-  console.log(`  ${chalk.cyan('Call edges created')}    ${stats.callEdgesCreated}`);
+  console.log(`  ${chalk.cyan('Symbols found')}     ${stats.symbolsFound}`);
+  console.log(`  ${chalk.cyan('Files indexed')}     ${stats.fileNodesCreated}`);
+  console.log(`  ${chalk.cyan('Call edges')}        ${stats.callEdgesCreated}`);
   if (stats.parseErrors > 0) {
     console.log(chalk.yellow(`  Parse errors: ${stats.parseErrors}`));
-  }
-  if (stats.driftWarnings.length > 0) {
-    const suggestionMap = new Map(
-      stats.renameSuggestions.map((s) => [`${s.specId}::${s.oldSymbolId}`, s]),
-    );
-    console.log('');
-    console.log(chalk.yellow('Drift warnings (symbol declared in spec but not found in code):'));
-    for (const w of stats.driftWarnings) {
-      const colonIdx = w.indexOf(':');
-      const specId = w.slice(0, colonIdx);
-      const symbolId = w.slice(colonIdx + 2, w.lastIndexOf(' not found'));
-      console.log(chalk.yellow(`  ⚠ ${w}`));
-      const suggestion = suggestionMap.get(`${specId}::${symbolId}`);
-      if (suggestion) {
-        const label =
-          suggestion.reason === 'different_file_same_fqn' ? 'file moved, same name' : 'same file, same class';
-        console.log(chalk.gray(`     → Did you rename to ${suggestion.suggestedSymbolId}? (${label})`));
-        console.log(chalk.gray(`       Fix: specgraph update --id ${specId} \\`));
-        console.log(chalk.gray(`                 --remove-symbol ${symbolId} \\`));
-        console.log(chalk.gray(`                 --add-symbol ${suggestion.suggestedSymbolId}`));
-      }
-    }
   }
 }
 
@@ -75,17 +62,11 @@ async function runOneAnalyze(
   config: SpecGraphConfig,
   verbose: boolean,
   full: boolean,
-): Promise<{ filesScanned: number; driftCount: number }> {
-  const specsDir = path.resolve(projectDir, config.specsDir);
-  const { specs, warnings } = parseAllSpecs(specsDir);
-
+): Promise<{ filesScanned: number }> {
   if (verbose) {
     console.log(chalk.cyan('Analyzing source code…'));
     console.log(chalk.gray(`  Directories: ${config.analyze.include.join(', ')}`));
     console.log(chalk.gray(`  Languages:   ${config.analyze.languages.join(', ')}`));
-    for (const w of warnings) {
-      console.warn(chalk.yellow(`  ⚠ ${w}`));
-    }
   }
 
   // Compute changed/deleted files unless forced full rebuild
@@ -126,16 +107,24 @@ async function runOneAnalyze(
   try {
     const onProgress = makeProgressCallback(verbose);
 
-    if (full || Object.keys(prevMtimes).length === 0) {
-      // No prior state or forced full rebuild
+    // The state cache lives beside the database but outlives it — deleting
+    // graph.db alone leaves a cache claiming every file is already indexed,
+    // which would silently under-index. An empty graph forces a full rebuild
+    // regardless of what the cache says.
+    const graphIsEmpty = !full && Object.keys(prevMtimes).length > 0 && (await isGraphEmpty(conn));
+    if (graphIsEmpty && verbose) {
+      console.log(chalk.gray('  Graph is empty but a state cache exists — forcing full rebuild.'));
+    }
+
+    if (full || graphIsEmpty || Object.keys(prevMtimes).length === 0) {
+      // No prior state, empty graph, or forced full rebuild
       mode = 'full';
-      stats = await analyzeAndIndex(conn, projectDir, specs, config, onProgress);
+      stats = await analyzeAndIndex(conn, projectDir, config, onProgress);
     } else if (changedPaths.size === 0 && deletedPaths.size === 0) {
       mode = 'skip';
       stats = {
-        filesScanned: 0, symbolsFound: 0, implementationsLinked: 0,
-        callEdgesCreated: 0, containsEdgesCreated: 0, fileNodesCreated: 0,
-        parseErrors: 0, unresolvedSymbols: 0, driftWarnings: [], renameSuggestions: [],
+        filesScanned: 0, symbolsFound: 0, callEdgesCreated: 0,
+        containsEdgesCreated: 0, fileNodesCreated: 0, parseErrors: 0,
       };
     } else {
       mode = 'incremental';
@@ -143,7 +132,7 @@ async function runOneAnalyze(
         console.log(chalk.gray(`  Mode: incremental (${changedPaths.size} changed, ${deletedPaths.size} deleted)`));
       }
       stats = await analyzeAndIndexIncremental(
-        conn, projectDir, specs, config, changedPaths, deletedPaths, onProgress,
+        conn, projectDir, config, changedPaths, deletedPaths, onProgress,
       );
     }
 
@@ -158,7 +147,7 @@ async function runOneAnalyze(
     saveAnalyzeState(projectDir, { fileMtimes: currentMtimes });
   }
 
-  return { filesScanned: stats.filesScanned, driftCount: stats.driftWarnings.length };
+  return { filesScanned: stats.filesScanned };
 }
 
 export async function runAnalyze(options: {

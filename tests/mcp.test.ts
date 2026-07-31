@@ -2,6 +2,8 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
+import { openDatabase, closeDatabase, dropAndRecreateSchema } from '../src/core/db.js';
+import type { Database, Connection } from '@ladybugdb/core';
 
 // ─── isMutatingQuery (white-box test of the guard logic) ──────────────────────
 // Mirrors the function in mcp.ts exactly so we can test it in isolation.
@@ -18,7 +20,7 @@ describe('isMutatingQuery', () => {
   it('blocks SET', () => expect(isMutatingQuery('SET n.prop = 1')).toBe(true));
   it('blocks DELETE', () => expect(isMutatingQuery('DELETE n')).toBe(true));
   it('blocks REMOVE', () => expect(isMutatingQuery('REMOVE n.prop')).toBe(true));
-  it('blocks DROP', () => expect(isMutatingQuery('DROP TABLE Spec')).toBe(true));
+  it('blocks DROP', () => expect(isMutatingQuery('DROP TABLE Record')).toBe(true));
   it('is case-insensitive', () => expect(isMutatingQuery('create (:Foo)')).toBe(true));
   it('allows leading whitespace', () => expect(isMutatingQuery('  CREATE (:Foo)')).toBe(true));
 
@@ -39,109 +41,26 @@ describe('runMcp export', () => {
   });
 });
 
-// ─── create_spec via spec-writer (used by MCP create_spec tool) ───────────────
 
-import { createSpec, updateSpec, ALLOWED_SPEC_TYPES } from '../src/core/spec-writer.js';
-import { parseSpecFile, parseAllSpecs } from '../src/core/parser.js';
-import { openDatabase, closeDatabase } from '../src/core/db.js';
-import { indexSpecs } from '../src/core/indexer.js';
-import type { Database, Connection } from '@ladybugdb/core';
-
-let tmpDir: string;
-
-beforeEach(() => {
-  tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'specgraph-mcp-'));
-});
-
-afterEach(() => {
-  fs.rmSync(tmpDir, { recursive: true, force: true });
-});
-
-describe('create_spec tool logic (via spec-writer)', () => {
-  it('creates a spec file with the correct structure', () => {
-    const { filePath } = createSpec({
-      title: 'MCP test spec',
-      type: 'intent',
-      specsDir: tmpDir,
-    });
-    const parsed = parseSpecFile(filePath);
-    expect(parsed.frontmatter.title).toBe('MCP test spec');
-    expect(parsed.frontmatter.type).toBe('intent');
-    expect(parsed.frontmatter.status).toBe('draft');
-    expect(filePath).toContain('mcp-test-spec.md');
-  });
-
-  it('returns an error message for duplicate titles (error thrown by spec-writer)', () => {
-    const opts = { title: 'Dup', type: 'intent', specsDir: tmpDir };
-    createSpec(opts);
-    expect(() => createSpec(opts)).toThrow('already exists');
-  });
-
-  it('returns an error message for invalid type', () => {
-    expect(() =>
-      createSpec({ title: 'Bad', type: 'invalid_type', specsDir: tmpDir }),
-    ).toThrow('Invalid spec type');
-  });
-
-  it('populates implements from symbols list', () => {
-    const { filePath } = createSpec({
-      title: 'With symbols',
-      type: 'business_rule',
-      symbols: ['src/Model/Order.php::Order.setPrice'],
-      specsDir: tmpDir,
-    });
-    const parsed = parseSpecFile(filePath);
-    expect(parsed.frontmatter.implements?.[0]?.symbol).toBe('src/Model/Order.php::Order.setPrice');
-  });
-});
-
-// ─── update_spec tool logic (via spec-writer) ─────────────────────────────────
-
-describe('update_spec tool logic (via updateSpec)', () => {
-  it('updates status of an existing spec', () => {
-    createSpec({ title: 'U1', type: 'intent', specsDir: tmpDir });
-    const { filePath } = updateSpec({
-      id: 'u1',
-      specsDir: tmpDir,
-      status: 'active',
-    });
-    const parsed = parseSpecFile(filePath);
-    expect(parsed.frontmatter.status).toBe('active');
-  });
-
-  it('adds symbol links to a spec', () => {
-    createSpec({ title: 'U2', type: 'intent', specsDir: tmpDir });
-    updateSpec({
-      id: 'u2',
-      specsDir: tmpDir,
-      addSymbols: [{ symbol: 'src/core/db.ts::openDatabase', type: 'function' }],
-    });
-    const parsed = parseSpecFile(path.join(tmpDir, 'u2.md'));
-    expect(parsed.frontmatter.implements?.[0]?.symbol).toBe('src/core/db.ts::openDatabase');
-  });
-});
 
 // ─── Tool list completeness ───────────────────────────────────────────────────
 
 describe('MCP tool list', () => {
   // The expected tool names from the plan
   const EXPECTED_TOOLS = [
-    'list_specs',
-    'get_spec',
-    'list_rules',
-    'get_symbols_for_spec',
-    'get_specs_for_symbol',
-    'get_drift_report',
     'query_graph',
-    'create_spec',
-    'update_spec',
-    'get_unspecced_symbols',
+    'get_undocumented_symbols',
     'reindex',
     'get_callers',
     'get_callees',
     'get_impact',
+    'get_callers_transitive',
     'search_symbols',
-    'get_specs_for_symbol_with_context',
+    'get_records_for_symbol',
+    'search_records',
+    'get_records_by_kind',
+    'add_record',
+    'get_record_drift',
   ];
 
   it('mcp.ts contains all expected tool names', async () => {
@@ -155,18 +74,17 @@ describe('MCP tool list', () => {
   });
 });
 
-// ─── get_unspecced_symbols logic ──────────────────────────────────────────────
+// ─── get_undocumented_symbols logic ──────────────────────────────────────────
 
-describe('get_unspecced_symbols tool logic', () => {
+describe('get_undocumented_symbols tool logic', () => {
   let db: Database;
   let conn: Connection;
   let dbDir: string;
 
   beforeEach(async () => {
-    dbDir = fs.mkdtempSync(path.join(os.tmpdir(), 'specgraph-unspecced-'));
+    dbDir = fs.mkdtempSync(path.join(os.tmpdir(), 'specgraph-undoc-'));
     ({ db, conn } = await openDatabase(dbDir));
-    // indexSpecs calls dropAndRecreateSchema internally
-    await indexSpecs(conn, []);
+    await dropAndRecreateSchema(conn);
   });
 
   afterEach(async () => {
@@ -182,38 +100,39 @@ describe('get_unspecced_symbols tool logic', () => {
     if (!Array.isArray(r)) r.close();
   }
 
-  it('returns symbols with no IMPLEMENTS edge', async () => {
-    // one specced symbol (via indexSpecs), one raw unspecced symbol
-    await indexSpecs(conn, [{
-      id: 'S1',
-      frontmatter: { title: 'S1', type: 'intent', status: 'draft', implements: [{ symbol: 'src/a.ts::covered', type: 'function' }] },
-      content: '',
-      filePath: '/fake/s1.md',
-    }]);
-    await insertSymbol('src/b.ts::unspecced', 'src/b.ts');
+  async function attachRecord(recordId: string, symbolId: string): Promise<void> {
+    const r = await conn.query(
+      `CREATE (:Record { id: '${recordId}', kind: 'intent', claim: 'c', because: NULL, given: NULL, when_: NULL, then_: NULL, provenance: 'a', provenance_kind: 'a', ts: timestamp('2026-01-01 00:00:00'), live: true })`,
+    );
+    if (!Array.isArray(r)) r.close();
+    const e = await conn.query(
+      `MATCH (rec:Record {id: '${recordId}'}), (c:CodeSymbol {id: '${symbolId}'}) CREATE (rec)-[:ABOUT]->(c)`,
+    );
+    if (!Array.isArray(e)) e.close();
+  }
+
+  it('returns symbols no record is ABOUT', async () => {
+    await insertSymbol('src/a.ts::covered', 'src/a.ts');
+    await insertSymbol('src/b.ts::bare', 'src/b.ts');
+    await attachRecord('r00001', 'src/a.ts::covered');
 
     const { queryAll: qa } = await import('../src/core/db.js');
     const { rows } = await qa(
       conn,
-      `MATCH (c:CodeSymbol) WHERE NOT EXISTS { MATCH (c)-[:IMPLEMENTS]->() }
+      `MATCH (c:CodeSymbol) WHERE NOT EXISTS { MATCH (:Record)-[:ABOUT]->(c) }
        RETURN c.id AS id ORDER BY c.id`,
     );
-    expect(rows.map((r) => r['id'])).toContain('src/b.ts::unspecced');
-    expect(rows.map((r) => r['id'])).not.toContain('src/a.ts::covered');
+    expect(rows.map((r) => r['id'])).toEqual(['src/b.ts::bare']);
   });
 
-  it('returns empty array when all symbols have IMPLEMENTS edges', async () => {
-    await indexSpecs(conn, [{
-      id: 'S2',
-      frontmatter: { title: 'S2', type: 'intent', status: 'draft', implements: [{ symbol: 'src/a.ts::covered', type: 'function' }] },
-      content: '',
-      filePath: '/fake/s2.md',
-    }]);
+  it('returns empty when every symbol has a record', async () => {
+    await insertSymbol('src/a.ts::covered', 'src/a.ts');
+    await attachRecord('r00002', 'src/a.ts::covered');
 
     const { queryAll: qa } = await import('../src/core/db.js');
     const { rows } = await qa(
       conn,
-      `MATCH (c:CodeSymbol) WHERE NOT EXISTS { MATCH (c)-[:IMPLEMENTS]->() } RETURN c.id AS id`,
+      `MATCH (c:CodeSymbol) WHERE NOT EXISTS { MATCH (:Record)-[:ABOUT]->(c) } RETURN c.id AS id`,
     );
     expect(rows).toHaveLength(0);
   });
@@ -223,141 +142,17 @@ describe('get_unspecced_symbols tool logic', () => {
     await insertSymbol('src/y.ts::beta', 'src/y.ts');
 
     const { queryAll: qa } = await import('../src/core/db.js');
-    const fp = 'src/x.ts';
-    const safe = fp.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
     const { rows } = await qa(
       conn,
-      `MATCH (c:CodeSymbol) WHERE NOT EXISTS { MATCH (c)-[:IMPLEMENTS]->() } AND c.file_path = '${safe}' RETURN c.id AS id`,
+      `MATCH (c:CodeSymbol) WHERE NOT EXISTS { MATCH (:Record)-[:ABOUT]->(c) } AND c.file_path = 'src/x.ts' RETURN c.id AS id`,
     );
     expect(rows).toHaveLength(1);
     expect(rows[0]?.['id']).toBe('src/x.ts::alpha');
   });
 });
 
-// ─── get_unlinked_specs tool logic ───────────────────────────────────────────
 
-describe('get_unlinked_specs tool logic', () => {
-  let db: Database;
-  let conn: Connection;
-  let dbDir: string;
 
-  beforeEach(async () => {
-    dbDir = fs.mkdtempSync(path.join(os.tmpdir(), 'specgraph-unlinked-'));
-    fs.mkdirSync(path.join(dbDir, '.specgraph'), { recursive: true });
-    ({ db, conn } = await openDatabase(dbDir));
-  });
-
-  afterEach(async () => {
-    await closeDatabase(db, conn);
-    fs.rmSync(dbDir, { recursive: true, force: true });
-  });
-
-  it('returns specs with no IMPLEMENTS edges', async () => {
-    await indexSpecs(conn, [
-      { id: 'linked', frontmatter: { title: 'Linked', type: 'intent', status: 'active', implements: [{ symbol: 'src/a.ts::Foo', type: 'class' }] }, content: '', filePath: '/fake/linked.md' },
-      { id: 'orphan', frontmatter: { title: 'Orphan', type: 'intent', status: 'draft' }, content: '', filePath: '/fake/orphan.md' },
-    ]);
-    const { queryAll: qa } = await import('../src/core/db.js');
-    const { rows } = await qa(conn,
-      `MATCH (s:Spec) WHERE NOT EXISTS { MATCH ()-[:IMPLEMENTS]->(s) }
-       RETURN s.id AS id ORDER BY s.id`,
-    );
-    expect(rows.map((r) => r['id'])).toEqual(['orphan']);
-  });
-
-  it('returns empty when all specs have links', async () => {
-    await indexSpecs(conn, [
-      { id: 'linked', frontmatter: { title: 'Linked', type: 'intent', status: 'active', implements: [{ symbol: 'src/a.ts::Foo', type: 'class' }] }, content: '', filePath: '/fake/linked.md' },
-    ]);
-    const { queryAll: qa } = await import('../src/core/db.js');
-    const { rows } = await qa(conn,
-      `MATCH (s:Spec) WHERE NOT EXISTS { MATCH ()-[:IMPLEMENTS]->(s) }
-       RETURN s.id AS id`,
-    );
-    expect(rows).toHaveLength(0);
-  });
-});
-
-// ─── get_multi_spec_symbols tool logic ──────────────────────────────────────
-
-describe('get_multi_spec_symbols tool logic', () => {
-  let db: Database;
-  let conn: Connection;
-  let dbDir: string;
-
-  beforeEach(async () => {
-    dbDir = fs.mkdtempSync(path.join(os.tmpdir(), 'specgraph-multi-'));
-    fs.mkdirSync(path.join(dbDir, '.specgraph'), { recursive: true });
-    ({ db, conn } = await openDatabase(dbDir));
-  });
-
-  afterEach(async () => {
-    await closeDatabase(db, conn);
-    fs.rmSync(dbDir, { recursive: true, force: true });
-  });
-
-  it('returns symbols linked to multiple specs', async () => {
-    await indexSpecs(conn, [
-      { id: 'S1', frontmatter: { title: 'S1', type: 'intent', status: 'active', implements: [{ symbol: 'src/a.ts::Shared', type: 'class' }] }, content: '', filePath: '/fake/s1.md' },
-      { id: 'S2', frontmatter: { title: 'S2', type: 'intent', status: 'active', implements: [{ symbol: 'src/a.ts::Shared', type: 'class' }] }, content: '', filePath: '/fake/s2.md' },
-      { id: 'S3', frontmatter: { title: 'S3', type: 'intent', status: 'active', implements: [{ symbol: 'src/b.ts::Solo', type: 'class' }] }, content: '', filePath: '/fake/s3.md' },
-    ]);
-    const { queryAll: qa } = await import('../src/core/db.js');
-    const { rows } = await qa(conn,
-      `MATCH (c:CodeSymbol)-[:IMPLEMENTS]->(s:Spec)
-       WITH c, collect({id: s.id, title: s.title, type: s.type}) AS specs
-       WHERE size(specs) > 1
-       RETURN c.id AS symbolId, specs
-       ORDER BY c.id`,
-    );
-    expect(rows).toHaveLength(1);
-    expect(rows[0]?.['symbolId']).toBe('src/a.ts::Shared');
-  });
-
-  it('returns empty when no symbol links to multiple specs', async () => {
-    await indexSpecs(conn, [
-      { id: 'S1', frontmatter: { title: 'S1', type: 'intent', status: 'active', implements: [{ symbol: 'src/a.ts::A', type: 'class' }] }, content: '', filePath: '/fake/s1.md' },
-      { id: 'S2', frontmatter: { title: 'S2', type: 'intent', status: 'active', implements: [{ symbol: 'src/b.ts::B', type: 'class' }] }, content: '', filePath: '/fake/s2.md' },
-    ]);
-    const { queryAll: qa } = await import('../src/core/db.js');
-    const { rows } = await qa(conn,
-      `MATCH (c:CodeSymbol)-[:IMPLEMENTS]->(s:Spec)
-       WITH c, collect({id: s.id, title: s.title, type: s.type}) AS specs
-       WHERE size(specs) > 1
-       RETURN c.id AS symbolId`,
-    );
-    expect(rows).toHaveLength(0);
-  });
-});
-
-// ─── reindex logic ────────────────────────────────────────────────────────────
-
-describe('reindex tool logic', () => {
-  it('parseAllSpecs + indexSpecs returns correct stats for temp spec files', async () => {
-    createSpec({ title: 'Reindex One', type: 'intent', specsDir: tmpDir });
-    createSpec({
-      title: 'Reindex Two',
-      type: 'business_rule',
-      symbols: ['src/core/db.ts::openDatabase'],
-      specsDir: tmpDir,
-    });
-
-    const { specs } = parseAllSpecs(tmpDir);
-    expect(specs).toHaveLength(2);
-
-    const dbDir = fs.mkdtempSync(path.join(os.tmpdir(), 'specgraph-reindex-'));
-    const { db, conn } = await openDatabase(dbDir);
-    try {
-      const stats = await indexSpecs(conn, specs);
-      expect(stats.specs).toBe(2);
-      expect(stats.symbols).toBe(1);
-      expect(stats.implements).toBe(1);
-    } finally {
-      await closeDatabase(db, conn);
-      fs.rmSync(dbDir, { recursive: true, force: true });
-    }
-  });
-});
 
 // ─── call-graph handlers (SPEC-008) ───────────────────────────────────────────
 
@@ -371,7 +166,7 @@ describe('call-graph handlers', () => {
     // .specgraph is a directory (see DB_DIR)
     fs.mkdirSync(path.join(dbDir, '.specgraph'), { recursive: true });
     ({ db, conn } = await openDatabase(dbDir));
-    await indexSpecs(conn, []);
+    await dropAndRecreateSchema(conn);
     // Seed: a → b → c, a → d, d → b (cycle back)
     for (const [id, fqn] of [
       ['src/f.ts::a', 'a'],
@@ -482,7 +277,7 @@ describe('search_symbols handler', () => {
     dbDir = fs.mkdtempSync(path.join(os.tmpdir(), 'specgraph-search-'));
     fs.mkdirSync(path.join(dbDir, '.specgraph'), { recursive: true });
     ({ db, conn } = await openDatabase(dbDir));
-    await indexSpecs(conn, []);
+    await dropAndRecreateSchema(conn);
     const rows: [string, string, string][] = [
       ['src/auth.ts::signInWithGoogle', 'signInWithGoogle', 'function'],
       ['src/auth.ts::signInWithApple', 'signInWithApple', 'function'],
@@ -582,101 +377,3 @@ describe('search_symbols handler', () => {
   });
 });
 
-// ─── handleGetSpecsForSymbolWithContext (SPEC-011) ────────────────────────────
-
-describe('handleGetSpecsForSymbolWithContext', () => {
-  let dbDir: string;
-  let db: Database;
-  let conn: Connection;
-
-  beforeEach(async () => {
-    dbDir = fs.mkdtempSync(path.join(os.tmpdir(), 'specgraph-ctx-'));
-    fs.mkdirSync(path.join(dbDir, '.specgraph'), { recursive: true });
-    ({ db, conn } = await openDatabase(dbDir));
-    await indexSpecs(conn, [
-      { id: 'SPEC-M', frontmatter: { title: 'Method Spec', type: 'software_requirement', status: 'active' }, content: '', filePath: '' },
-      { id: 'SPEC-C', frontmatter: { title: 'Class Spec', type: 'software_requirement', status: 'active' }, content: '', filePath: '' },
-      { id: 'SPEC-F', frontmatter: { title: 'File Spec', type: 'software_requirement', status: 'active' }, content: '', filePath: '' },
-    ]);
-    // Seed CodeSymbol nodes
-    for (const [id, fqn] of [
-      ['src/auth.ts::UserService', 'UserService'],
-      ['src/auth.ts::UserService.signIn', 'UserService.signIn'],
-    ]) {
-      const r = await conn.query(
-        `CREATE (:CodeSymbol { id: '${id}', fqn: '${fqn}', symbol_type: 'class', file_path: 'src/auth.ts', line_start: 0, line_end: 0, language: 'typescript' })`,
-      );
-      if (!Array.isArray(r)) r.close();
-    }
-    // Seed File node
-    const rf = await conn.query(
-      `CREATE (:File { id: 'src/auth.ts', path: 'src/auth.ts', ext: '.ts', kind: 'source' })`,
-    );
-    if (!Array.isArray(rf)) rf.close();
-    // Seed IMPLEMENTS edges
-    for (const [fromId, toId] of [
-      ['src/auth.ts::UserService.signIn', 'SPEC-M'],
-      ['src/auth.ts::UserService', 'SPEC-C'],
-    ]) {
-      const r = await conn.query(
-        `MATCH (c:CodeSymbol {id: '${fromId}'}), (s:Spec {id: '${toId}'}) CREATE (c)-[:IMPLEMENTS {confidence: 1.0}]->(s)`,
-      );
-      if (!Array.isArray(r)) r.close();
-    }
-    const rf2 = await conn.query(
-      `MATCH (f:File {id: 'src/auth.ts'}), (s:Spec {id: 'SPEC-F'}) CREATE (f)-[:IMPLEMENTS {confidence: 1.0}]->(s)`,
-    );
-    if (!Array.isArray(rf2)) rf2.close();
-    await closeDatabase(db, conn);
-  });
-
-  afterEach(() => {
-    fs.rmSync(dbDir, { recursive: true, force: true });
-  });
-
-  function parseJsonResult(res: { content: { type: string; text: string }[] }): unknown {
-    return JSON.parse(res.content[0]!.text);
-  }
-
-  it('method symbolId returns symbol-scope and class-scope specs', async () => {
-    const { handleGetSpecsForSymbolWithContext } = await import('../src/cli/commands/mcp.js');
-    const res = parseJsonResult(
-      await handleGetSpecsForSymbolWithContext(dbDir, 'src/auth.ts::UserService.signIn'),
-    ) as { scope: string; symbolId: string; specs: { id: string }[] }[];
-    const scopes = res.map((r) => r.scope);
-    expect(scopes).toContain('symbol');
-    expect(scopes).toContain('class');
-    const symbolEntry = res.find((r) => r.scope === 'symbol')!;
-    expect(symbolEntry.specs.map((s) => s.id)).toContain('SPEC-M');
-    const classEntry = res.find((r) => r.scope === 'class')!;
-    expect(classEntry.specs.map((s) => s.id)).toContain('SPEC-C');
-  });
-
-  it('method symbolId includes file-scope specs', async () => {
-    const { handleGetSpecsForSymbolWithContext } = await import('../src/cli/commands/mcp.js');
-    const res = parseJsonResult(
-      await handleGetSpecsForSymbolWithContext(dbDir, 'src/auth.ts::UserService.signIn'),
-    ) as { scope: string; specs: { id: string }[] }[];
-    const fileEntry = res.find((r) => r.scope === 'file');
-    expect(fileEntry).toBeDefined();
-    expect(fileEntry!.specs.map((s) => s.id)).toContain('SPEC-F');
-  });
-
-  it('bare file path returns only file-scope specs', async () => {
-    const { handleGetSpecsForSymbolWithContext } = await import('../src/cli/commands/mcp.js');
-    const res = parseJsonResult(
-      await handleGetSpecsForSymbolWithContext(dbDir, 'src/auth.ts'),
-    ) as { scope: string; specs: { id: string }[] }[];
-    expect(res).toHaveLength(1);
-    expect(res[0]!.scope).toBe('file');
-    expect(res[0]!.specs.map((s) => s.id)).toContain('SPEC-F');
-  });
-
-  it('unknown symbolId returns empty array', async () => {
-    const { handleGetSpecsForSymbolWithContext } = await import('../src/cli/commands/mcp.js');
-    const res = parseJsonResult(
-      await handleGetSpecsForSymbolWithContext(dbDir, 'src/does-not-exist.ts::nope'),
-    );
-    expect(res).toEqual([]);
-  });
-});

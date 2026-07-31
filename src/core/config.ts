@@ -9,7 +9,6 @@ const LEGACY_CONFIG_FILE = 'config.json';
 function parseConfig(raw: string): SpecGraphConfig {
   const parsed = JSON.parse(raw) as Partial<SpecGraphConfig>;
   return {
-    specsDir: parsed.specsDir ?? DEFAULT_CONFIG.specsDir,
     analyze: {
       include: parsed.analyze?.include ?? DEFAULT_CONFIG.analyze.include,
       exclude: parsed.analyze?.exclude ?? DEFAULT_CONFIG.analyze.exclude,

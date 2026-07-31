@@ -1,7 +1,7 @@
 import { Database, Connection, QueryResult } from '@ladybugdb/core';
 import path from 'node:path';
 import fs from 'node:fs';
-import { SCHEMA_STATEMENTS, SCHEMA_TABLE_NAMES, DROP_ORDER } from './schema.js';
+import { SCHEMA_STATEMENTS, SCHEMA_TABLE_NAMES, DROP_ORDER, LEGACY_TABLES } from './schema.js';
 
 export const DB_DIR = '.specgraph';
 export const DB_FILE = 'graph.db';
@@ -54,6 +54,7 @@ async function tableExists(conn: Connection, name: string): Promise<boolean> {
  * newly added tables without a rebuild.
  */
 export async function ensureSchema(conn: Connection): Promise<void> {
+  await dropLegacyTables(conn);
   for (let i = 0; i < SCHEMA_STATEMENTS.length; i++) {
     const name = SCHEMA_TABLE_NAMES[i];
     const stmt = SCHEMA_STATEMENTS[i];
@@ -61,6 +62,23 @@ export async function ensureSchema(conn: Connection): Promise<void> {
     if (await tableExists(conn, name)) continue;
     const result = await runQuery(conn, stmt);
     result.close();
+  }
+}
+
+/**
+ * Drop tables left behind by the spec-based versions. LEGACY_TABLES is ordered
+ * edges-first because a node table cannot be dropped while relationships still
+ * point at it.
+ */
+export async function dropLegacyTables(conn: Connection): Promise<void> {
+  for (const name of LEGACY_TABLES) {
+    if (!(await tableExists(conn, name))) continue;
+    try {
+      const result = await runQuery(conn, `DROP TABLE ${name}`);
+      result.close();
+    } catch {
+      // A leftover table that refuses to drop is inert — never block startup.
+    }
   }
 }
 

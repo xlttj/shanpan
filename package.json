@@ -1,7 +1,7 @@
 {
   "name": "specgraph",
   "version": "0.1.0",
-  "description": "CLI tool that stores specs and business rules as a knowledge graph in LadybugDB, queryable via MCP for AI agents",
+  "description": "CLI and MCP server that stores agent-native code knowledge as a graph in LadybugDB",
   "license": "MIT",
   "type": "module",
   "bin": {
@@ -26,7 +26,6 @@
     "@parcel/watcher": "^2.5.6",
     "chalk": "^5.3.0",
     "commander": "^12.0.0",
-    "gray-matter": "^4.0.3",
     "tree-sitter": "^0.25.0",
     "tree-sitter-php": "^0.24.2",
     "tree-sitter-typescript": "^0.23.2"

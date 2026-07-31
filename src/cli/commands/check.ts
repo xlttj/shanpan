@@ -1,11 +1,16 @@
 import chalk from 'chalk';
 import { execFileSync } from 'node:child_process';
 import { openDatabase, closeDatabase, dbExists, queryAll, escId } from '../../core/db.js';
-import { computeDrift, driftKey, loadDriftCache, saveDriftCache } from '../../core/drift.js';
+import {
+  computeRecordDrift,
+  driftKey,
+  loadDriftCache,
+  saveDriftCache,
+} from '../../core/record-drift.js';
 
 interface StagedChanges {
-  removed: string[]; // deleted or renamed — symbol IDs definitively broken
-  modified: string[]; // content changed — symbol may still exist, behaviour may differ
+  removed: string[]; // deleted or renamed — subjects definitively broken
+  modified: string[]; // content changed — subject exists, behaviour may differ
 }
 
 function getStagedChanges(): StagedChanges {
@@ -55,43 +60,51 @@ async function runHookOutputCheck(projectDir: string): Promise<void> {
   }
 
   const { db, conn } = await openDatabase(projectDir, true);
-  let drift;
+  let report;
   try {
-    drift = await computeDrift(conn, projectDir);
+    report = await computeRecordDrift(conn, projectDir);
   } finally {
     await closeDatabase(db, conn);
   }
 
   // Only block on drift that is new since the last hook invocation. Without
-  // this, persistent drift would re-fire the block message on every Stop event
-  // and trap the agent in a loop, repeatedly investigating drift it has already
-  // been told about and cannot fix without explicit user intent.
+  // this, persistent drift re-fires the block on every Stop event and traps
+  // the agent in a loop, re-investigating drift it has already been told about
+  // and cannot fix without explicit user intent.
   const previouslyReported = loadDriftCache(projectDir);
-  const newDrift = drift.filter((d) => !previouslyReported.has(driftKey(d)));
-  saveDriftCache(projectDir, drift);
+  const newDrift = report.unresolved.filter((d) => !previouslyReported.has(driftKey(d)));
+  saveDriftCache(projectDir, report.unresolved);
 
-  if (newDrift.length === 0) {
+  if (newDrift.length === 0 && report.invalidRecords.length === 0) {
     process.stdout.write('{}');
     return;
   }
 
-  const preview = newDrift
-    .slice(0, 3)
-    .map((d) => `  - ${d.specId} → ${d.symbolId}`)
-    .join('\n');
-  const more = newDrift.length > 3 ? `\n  …and ${newDrift.length - 3} more` : '';
-  const plural = newDrift.length === 1 ? '' : 's';
+  const parts: string[] = [];
 
-  process.stdout.write(
-    JSON.stringify({
-      decision: 'block',
-      reason:
-        `Spec drift: ${newDrift.length} new broken link${plural} detected:\n${preview}${more}\n` +
-        'Run `specgraph check` or use the MCP `get_drift_report` tool to inspect, ' +
-        'then update the affected spec(s). This warning is shown once per drift state — ' +
-        'do not retry the same checks if it does not reappear.',
-    }),
-  );
+  if (report.invalidRecords.length > 0) {
+    parts.push(
+      `${report.invalidRecords.length} knowledge record(s) fail validation. ` +
+        'Run `specgraph records check` to see them — the graph is not being updated from them.',
+    );
+  }
+
+  if (newDrift.length > 0) {
+    const preview = newDrift
+      .slice(0, 3)
+      .map((d) => `  - ${d.recordId} → ${d.subject}`)
+      .join('\n');
+    const more = newDrift.length > 3 ? `\n  …and ${newDrift.length - 3} more` : '';
+    const plural = newDrift.length === 1 ? '' : 's';
+    parts.push(
+      `Record drift: ${newDrift.length} subject${plural} no longer resolve${newDrift.length === 1 ? 's' : ''} to any symbol or file:\n${preview}${more}\n` +
+        'Inspect with the MCP `get_record_drift` tool. Either the code moved — then supersede the ' +
+        'record with a corrected subject — or the knowledge is obsolete. ' +
+        'This warning is shown once per drift state; do not retry the same checks if it does not reappear.',
+    );
+  }
+
+  process.stdout.write(JSON.stringify({ decision: 'block', reason: parts.join('\n\n') }));
 }
 
 export async function runCheck(options: { staged: boolean; hookOutput?: boolean }): Promise<void> {
@@ -103,13 +116,33 @@ export async function runCheck(options: { staged: boolean; hookOutput?: boolean 
   }
 
   if (!dbExists(projectDir)) {
-    console.log(chalk.gray('No SpecGraph database found — skipping spec integrity check.'));
+    console.log(chalk.gray('No SpecGraph database found — skipping knowledge integrity check.'));
     return;
   }
 
   if (!options.staged) {
-    console.log(chalk.gray('Usage: specgraph check --staged'));
-    console.log(chalk.gray('Run as a pre-commit hook to detect spec drift.'));
+    const { db, conn } = await openDatabase(projectDir, true);
+    try {
+      const report = await computeRecordDrift(conn, projectDir);
+      if (report.invalidRecords.length > 0) {
+        console.error(chalk.red(`✗ ${report.invalidRecords.length} invalid record(s):`));
+        for (const e of report.invalidRecords) {
+          console.error(chalk.red(`  line ${e.line}${e.id ? ` (${e.id})` : ''}: ${e.message}`));
+        }
+      }
+      if (report.unresolved.length === 0) {
+        console.log(chalk.green('✓ Every record subject resolves'));
+      } else {
+        console.log(chalk.yellow(`⚠ ${report.unresolved.length} unresolved subject(s):`));
+        for (const d of report.unresolved) {
+          console.log(chalk.yellow(`  ${d.recordId} → ${d.subject}`));
+          console.log(chalk.gray(`     ${d.claim}`));
+        }
+      }
+      if (report.invalidRecords.length > 0) process.exitCode = 1;
+    } finally {
+      await closeDatabase(db, conn);
+    }
     return;
   }
 
@@ -122,64 +155,51 @@ export async function runCheck(options: { staged: boolean; hookOutput?: boolean 
   let hasViolations = false;
 
   try {
-    // Hard block: files deleted or renamed — spec references are now broken.
-    // Check both CodeSymbol nodes (by file_path) and File nodes (by id).
+    // Hard block: files deleted or renamed — record subjects are now broken.
     if (removed.length > 0) {
-      const { rows: symRows } = await queryAll(
+      const { rows } = await queryAll(
         conn,
-        `MATCH (c:CodeSymbol)-[:IMPLEMENTS]->(s:Spec)
-         WHERE c.file_path IN [${escList(removed)}]
-         RETURN c.id AS symbolId, s.id AS specId`,
+        `MATCH (r:Record)-[:ABOUT]->(t)
+         WHERE r.live AND (t.file_path IN [${escList(removed)}] OR t.id IN [${escList(removed)}])
+         RETURN DISTINCT r.id AS recordId, r.claim AS claim, t.id AS subject`,
       );
-      const { rows: fileRows } = await queryAll(
-        conn,
-        `MATCH (f:File)-[:IMPLEMENTS]->(s:Spec)
-         WHERE f.id IN [${escList(removed)}]
-         RETURN f.id AS symbolId, s.id AS specId`,
-      );
-      const rows = [...symRows, ...fileRows];
 
       if (rows.length > 0) {
         hasViolations = true;
-        console.error(chalk.red('✗ Pre-commit: spec integrity violation'));
+        console.error(chalk.red('✗ Pre-commit: knowledge integrity violation'));
         console.error('');
-        console.error(chalk.red('  The following specs reference symbols in files being deleted or renamed:'));
+        console.error(chalk.red('  These records describe code in files being deleted or renamed:'));
         console.error('');
         for (const row of rows) {
-          console.error(chalk.red(`  ${String(row['specId'])} references ${String(row['symbolId'])}`));
+          console.error(chalk.red(`  ${String(row['recordId'])} → ${String(row['subject'])}`));
+          console.error(chalk.gray(`     ${String(row['claim'])}`));
         }
         console.error('');
-        console.error(chalk.gray('  Update the spec(s) to reflect the rename, or run `specgraph analyze` after.'));
+        console.error(
+          chalk.gray('  Supersede each record with a corrected subject, or drop it if the knowledge no longer applies.'),
+        );
       }
     }
 
-    // Soft warn: files modified.
-    // For CodeSymbols: the symbol may still exist but behaviour may have changed.
-    // For File nodes: any change is semantically significant — content must be
-    // re-verified against the spec.
+    // Soft warn: files modified — the subject still exists but the claim may
+    // no longer hold. Only an agent or a human can judge that.
     if (modified.length > 0) {
-      const { rows: symRows } = await queryAll(
+      const { rows } = await queryAll(
         conn,
-        `MATCH (c:CodeSymbol)-[:IMPLEMENTS]->(s:Spec)
-         WHERE c.file_path IN [${escList(modified)}]
-         RETURN c.id AS symbolId, s.id AS specId`,
+        `MATCH (r:Record)-[:ABOUT]->(t)
+         WHERE r.live AND (t.file_path IN [${escList(modified)}] OR t.id IN [${escList(modified)}])
+         RETURN DISTINCT r.id AS recordId, r.claim AS claim, t.id AS subject`,
       );
-      const { rows: fileRows } = await queryAll(
-        conn,
-        `MATCH (f:File)-[:IMPLEMENTS]->(s:Spec)
-         WHERE f.id IN [${escList(modified)}]
-         RETURN f.id AS symbolId, s.id AS specId`,
-      );
-      const rows = [...symRows, ...fileRows];
 
       if (rows.length > 0) {
-        console.error(chalk.yellow('⚠ Spec review suggested: the following specs reference symbols in modified files:'));
+        console.error(chalk.yellow('⚠ Review suggested — these records describe modified code:'));
         console.error('');
         for (const row of rows) {
-          console.error(chalk.yellow(`  ${String(row['specId'])} → ${String(row['symbolId'])} (file modified)`));
+          console.error(chalk.yellow(`  ${String(row['recordId'])} → ${String(row['subject'])}`));
+          console.error(chalk.gray(`     ${String(row['claim'])}`));
         }
         console.error('');
-        console.error(chalk.gray('  Update spec text if behaviour changed, then run `specgraph analyze`.'));
+        console.error(chalk.gray('  If a claim no longer holds, supersede it rather than editing in place.'));
       }
     }
   } finally {

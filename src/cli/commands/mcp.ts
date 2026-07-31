@@ -7,16 +7,10 @@ import {
   ListToolsRequestSchema,
 } from '@modelcontextprotocol/sdk/types.js';
 import { openDatabase, closeDatabase, dbExists, queryAll, escId } from '../../core/db.js';
-import { loadConfig } from '../../core/config.js';
-import { parseSpecFile, findSpecFiles, parseAllSpecs } from '../../core/parser.js';
-import { createSpec, updateSpec, ALLOWED_SPEC_TYPES } from '../../core/spec-writer.js';
-import { indexSpecs } from '../../core/indexer.js';
-import { suggestRenames } from '../../analyzer/resolver.js';
-import { computeDrift } from '../../core/drift.js';
+import { computeRecordDrift } from '../../core/record-drift.js';
 import {
   readRecords,
   appendRecords,
-  liveIds,
   nextId,
   formatTs,
   validateRecord,
@@ -354,32 +348,16 @@ export async function handleGetRecordsByKind(
 }
 
 /**
- * Subjects that resolve to no node — the record-level equivalent of spec drift.
+ * Subjects that resolve to no CodeSymbol and no File.
  * Recomputed from disk rather than the graph, so it stays correct even when
  * the graph is stale.
  */
 export async function handleGetRecordDrift(
   projectDir: string,
 ): Promise<{ content: { type: 'text'; text: string }[] }> {
-  const { records, errors } = readRecords(projectDir);
   const { db, conn } = await openDatabase(projectDir, true);
   try {
-    const { rows: symbolRows } = await queryAll(conn, 'MATCH (c:CodeSymbol) RETURN c.id AS id');
-    const known = new Set(symbolRows.map((r) => String(r['id'])));
-    const { rows: fileRows } = await queryAll(conn, 'MATCH (f:File) RETURN f.id AS id');
-    for (const r of fileRows) known.add(String(r['id']));
-
-    const live = liveIds(records);
-    const unresolved: { recordId: string; subject: string; claim: string }[] = [];
-    for (const rec of records) {
-      if (!live.has(rec.id)) continue;
-      for (const subject of rec.sb ?? []) {
-        if (!known.has(subject)) {
-          unresolved.push({ recordId: rec.id, subject, claim: rec.cl });
-        }
-      }
-    }
-    return jsonResult({ unresolved, invalidRecords: errors });
+    return jsonResult(await computeRecordDrift(conn, projectDir));
   } finally {
     await closeDatabase(db, conn);
   }
@@ -443,84 +421,6 @@ export async function handleAddRecord(
   return textResult(`Created record ${rec.id} (${rec.kn}). Call reindex to make it queryable.`);
 }
 
-export async function handleGetSpecsForSymbolWithContext(
-  projectDir: string,
-  symbolId: string,
-): Promise<{ content: { type: 'text'; text: string }[] }> {
-  const { db, conn } = await openDatabase(projectDir, true);
-  try {
-    const sep = symbolId.indexOf('::');
-    const filePath = sep === -1 ? symbolId : symbolId.slice(0, sep);
-    const fqn = sep === -1 ? null : symbolId.slice(sep + 2);
-
-    // Build the FQN ancestor chain: e.g. "UserService.signIn" → ["UserService.signIn", "UserService"]
-    const fqnLevels: string[] = [];
-    if (fqn) {
-      let current = fqn;
-      while (current) {
-        fqnLevels.push(current);
-        const dot = current.lastIndexOf('.');
-        if (dot === -1) break;
-        current = current.slice(0, dot);
-      }
-    }
-
-    const result: { scope: string; symbolId: string; specs: unknown[] }[] = [];
-
-    // Query each FQN level (symbol → parent class → … )
-    for (let i = 0; i < fqnLevels.length; i++) {
-      const id = `${filePath}::${fqnLevels[i]}`;
-      const { rows } = await queryAll(
-        conn,
-        `MATCH (c:CodeSymbol {id: '${escId(id)}'})-[:IMPLEMENTS]->(s:Spec)
-         RETURN s.id AS id, s.title AS title, s.type AS type, s.status AS status`,
-      );
-      if (rows.length > 0) {
-        const scope = i === 0 ? 'symbol' : i === fqnLevels.length - 1 ? 'class' : 'parent';
-        result.push({ scope, symbolId: id, specs: rows });
-      }
-    }
-
-    // Query File node specs
-    const { rows: fileRows } = await queryAll(
-      conn,
-      `MATCH (f:File {id: '${escId(filePath)}'})-[:IMPLEMENTS]->(s:Spec)
-       RETURN s.id AS id, s.title AS title, s.type AS type, s.status AS status`,
-    );
-    if (fileRows.length > 0) {
-      result.push({ scope: 'file', symbolId: filePath, specs: fileRows });
-    }
-
-    // Specs linked to 1-hop callers (symbols that call this one)
-    const { rows: callerSpecRows } = await queryAll(
-      conn,
-      `MATCH (caller:CodeSymbol)-[:CALLS]->(:CodeSymbol {id: '${escId(symbolId)}'})
-       MATCH (caller)-[:IMPLEMENTS]->(s:Spec)
-       RETURN s.id AS id, s.title AS title, s.type AS type, s.status AS status,
-              caller.id AS viaSymbolId`,
-    );
-    if (callerSpecRows.length > 0) {
-      result.push({ scope: 'callers', symbolId, specs: callerSpecRows });
-    }
-
-    // Specs linked to 1-hop callees (symbols this one calls)
-    const { rows: calleeSpecRows } = await queryAll(
-      conn,
-      `MATCH (:CodeSymbol {id: '${escId(symbolId)}'})-[:CALLS]->(callee:CodeSymbol)
-       MATCH (callee)-[:IMPLEMENTS]->(s:Spec)
-       RETURN s.id AS id, s.title AS title, s.type AS type, s.status AS status,
-              callee.id AS viaSymbolId`,
-    );
-    if (calleeSpecRows.length > 0) {
-      result.push({ scope: 'callees', symbolId, specs: calleeSpecRows });
-    }
-
-    return jsonResult(result);
-  } finally {
-    await closeDatabase(db, conn);
-  }
-}
-
 export async function runMcp(options: { projectDir?: string } = {}): Promise<void> {
   const projectDir = options.projectDir ? path.resolve(options.projectDir) : process.cwd();
 
@@ -532,54 +432,6 @@ export async function runMcp(options: { projectDir?: string } = {}): Promise<voi
   server.setRequestHandler(ListToolsRequestSchema, async () => ({
     tools: [
       {
-        name: 'list_specs',
-        description: 'List all specs with id, title, type, and status',
-        inputSchema: { type: 'object', properties: {} },
-      },
-      {
-        name: 'get_spec',
-        description: 'Get full content (frontmatter + body) of a spec by path key',
-        inputSchema: {
-          type: 'object',
-          properties: { id: { type: 'string', description: 'Spec path key, e.g. core/spec-parser' } },
-          required: ['id'],
-        },
-      },
-      {
-        name: 'list_rules',
-        description: 'List all BusinessRule nodes',
-        inputSchema: { type: 'object', properties: {} },
-      },
-      {
-        name: 'get_symbols_for_spec',
-        description: 'Get code symbols linked to a spec via IMPLEMENTS',
-        inputSchema: {
-          type: 'object',
-          properties: { id: { type: 'string', description: 'Spec path key, e.g. core/spec-parser' } },
-          required: ['id'],
-        },
-      },
-      {
-        name: 'get_specs_for_symbol',
-        description: 'Get specs that cover a given code symbol ID',
-        inputSchema: {
-          type: 'object',
-          properties: {
-            symbolId: {
-              type: 'string',
-              description: 'Symbol ID, e.g. "src/foo.ts::MyClass"',
-            },
-          },
-          required: ['symbolId'],
-        },
-      },
-      {
-        name: 'get_drift_report',
-        description:
-          'List spec implements entries whose symbol was not found during last analyze run',
-        inputSchema: { type: 'object', properties: {} },
-      },
-      {
         name: 'query_graph',
         description: 'Execute a read-only Cypher query against the graph',
         inputSchema: {
@@ -589,71 +441,9 @@ export async function runMcp(options: { projectDir?: string } = {}): Promise<voi
         },
       },
       {
-        name: 'create_spec',
-        description: 'Create a new spec markdown file',
-        inputSchema: {
-          type: 'object',
-          properties: {
-            title: { type: 'string', description: 'Human-readable title' },
-            type: {
-              type: 'string',
-              enum: [...ALLOWED_SPEC_TYPES],
-              description: 'Spec type',
-            },
-            dir: {
-              type: 'string',
-              description: 'Subdirectory under specsDir, e.g. core, cli, mcp',
-            },
-            symbols: {
-              type: 'array',
-              items: { type: 'string' },
-              description: 'Symbol IDs to link via implements',
-            },
-            refs: {
-              type: 'array',
-              items: { type: 'string' },
-              description: 'External URLs (http/https) to attach as context references',
-            },
-          },
-          required: ['title', 'type'],
-        },
-      },
-      {
-        name: 'update_spec',
-        description: 'Add/remove symbol links or change the status of an existing spec',
-        inputSchema: {
-          type: 'object',
-          properties: {
-            id: { type: 'string', description: 'Spec path key to update, e.g. core/spec-parser' },
-            addSymbols: {
-              type: 'array',
-              items: { type: 'string' },
-              description: 'Symbol IDs to add to implements',
-            },
-            removeSymbols: {
-              type: 'array',
-              items: { type: 'string' },
-              description: 'Symbol IDs to remove from implements',
-            },
-            addRefs: {
-              type: 'array',
-              items: { type: 'string' },
-              description: 'URLs to add to refs',
-            },
-            removeRefs: {
-              type: 'array',
-              items: { type: 'string' },
-              description: 'URLs to remove from refs',
-            },
-            status: { type: 'string', description: 'New status value' },
-          },
-          required: ['id'],
-        },
-      },
-      {
-        name: 'get_unspecced_symbols',
+        name: 'get_undocumented_symbols',
         description:
-          'List CodeSymbol nodes that have no IMPLEMENTS edge — symbols not yet covered by any spec. Optionally filter by file path.',
+          'List CodeSymbol nodes that no knowledge record is ABOUT — code nothing has been recorded against. Optionally filter by file path.',
         inputSchema: {
           type: 'object',
           properties: {
@@ -669,7 +459,7 @@ export async function runMcp(options: { projectDir?: string } = {}): Promise<voi
       {
         name: 'reindex',
         description:
-          'Re-parse all spec files and rebuild the graph database. Use after creating or updating spec files within an MCP session.',
+          'Re-read knowledge.ndjson and rebuild Record nodes. Call after add_record so the new record becomes queryable.',
         inputSchema: { type: 'object', properties: {} },
       },
       {
@@ -750,29 +540,6 @@ export async function runMcp(options: { projectDir?: string } = {}): Promise<voi
         },
       },
       {
-        name: 'get_specs_by_ref',
-        description: 'List specs that reference a given external URL via their refs field',
-        inputSchema: {
-          type: 'object',
-          properties: {
-            url: { type: 'string', description: 'Exact URL to look up' },
-          },
-          required: ['url'],
-        },
-      },
-      {
-        name: 'get_unlinked_specs',
-        description:
-          'List specs that have no implements entries — specs not yet linked to any code symbol.',
-        inputSchema: { type: 'object', properties: {} },
-      },
-      {
-        name: 'get_multi_spec_symbols',
-        description:
-          'List code symbols that are linked to more than one spec via IMPLEMENTS. Useful for spotting overlapping specs or intentional shared implementations.',
-        inputSchema: { type: 'object', properties: {} },
-      },
-      {
         name: 'get_records_for_symbol',
         description:
           'Knowledge records attached to a symbol, its containing file, and (for a method) its parent class. This is the same knowledge the PreToolUse hook injects. Kinds: gotcha and constraint are traps and invariants; rejected says what was already tried and abandoned; decision carries reasoning you should not re-litigate.',
@@ -849,21 +616,6 @@ export async function runMcp(options: { projectDir?: string } = {}): Promise<voi
           'Record subjects that no longer resolve to any symbol or file, plus any records that fail validation.',
         inputSchema: { type: 'object', properties: {} },
       },
-      {
-        name: 'get_specs_for_symbol_with_context',
-        description:
-          'Get specs for a symbol AND its containing class/file hierarchy AND its 1-hop call-graph neighbours. Returns results grouped by scope (symbol, parent, class, file, callers, callees), with empty scopes omitted. Callers/callees entries include a viaSymbolId field showing which neighbour linked the spec.',
-        inputSchema: {
-          type: 'object',
-          properties: {
-            symbolId: {
-              type: 'string',
-              description: 'Symbol ID (e.g. "src/auth/session.ts::UserService.signIn") or bare file path (e.g. "composer.json")',
-            },
-          },
-          required: ['symbolId'],
-        },
-      },
     ],
   }));
 
@@ -871,125 +623,15 @@ export async function runMcp(options: { projectDir?: string } = {}): Promise<voi
     const { name, arguments: args } = request.params;
     const a = (args ?? {}) as Record<string, unknown>;
 
-    if (!dbExists(projectDir) && name !== 'create_spec' && name !== 'update_spec') {
+    if (!dbExists(projectDir) && name !== 'add_record') {
       return textResult('No SpecGraph database found. Run `specgraph init` first.');
     }
 
-    if (name === 'list_specs') {
-      const { db, conn } = await openDatabase(projectDir, true);
-      try {
-        const { rows } = await queryAll(
-          conn,
-          'MATCH (s:Spec) RETURN s.id AS id, s.title AS title, s.type AS type, s.status AS status ORDER BY s.id',
-        );
-        return jsonResult(rows);
-      } finally {
-        await closeDatabase(db, conn);
-      }
-    }
 
-    if (name === 'get_spec') {
-      const id = String(a['id'] ?? '');
-      const config = loadConfig(projectDir);
-      const specsDir = path.resolve(projectDir, config.specsDir);
-      const filePath = path.join(specsDir, id.endsWith('.md') ? id : id + '.md');
-      try {
-        const parsed = parseSpecFile(filePath, specsDir);
-        return jsonResult({
-          frontmatter: parsed.frontmatter,
-          content: parsed.content,
-          filePath: path.relative(projectDir, parsed.filePath),
-        });
-      } catch {
-        return textResult(`Spec "${id}" not found.`);
-      }
-    }
 
-    if (name === 'list_rules') {
-      const { db, conn } = await openDatabase(projectDir, true);
-      try {
-        const { rows } = await queryAll(
-          conn,
-          'MATCH (r:BusinessRule) RETURN r.id AS id, r.title AS title, r.status AS status ORDER BY r.id',
-        );
-        return jsonResult(rows);
-      } finally {
-        await closeDatabase(db, conn);
-      }
-    }
 
-    if (name === 'get_symbols_for_spec') {
-      const id = String(a['id'] ?? '');
-      const esc = escId(id);
-      const { db, conn } = await openDatabase(projectDir, true);
-      try {
-        const { rows } = await queryAll(
-          conn,
-          `MATCH (c:CodeSymbol)-[:IMPLEMENTS]->(s:Spec {id: '${esc}'})
-           RETURN c.id AS id, c.fqn AS fqn, c.symbol_type AS kind,
-                  c.file_path AS filePath, c.line_start AS lineStart`,
-        );
-        return jsonResult(rows);
-      } finally {
-        await closeDatabase(db, conn);
-      }
-    }
 
-    if (name === 'get_specs_for_symbol') {
-      const symbolId = String(a['symbolId'] ?? '');
-      const esc = escId(symbolId);
-      const { db, conn } = await openDatabase(projectDir, true);
-      try {
-        const { rows: symRows } = await queryAll(
-          conn,
-          `MATCH (c:CodeSymbol {id: '${esc}'})-[:IMPLEMENTS]->(s:Spec)
-           RETURN s.id AS id, s.title AS title, s.type AS type, s.status AS status`,
-        );
-        const { rows: fileRows } = await queryAll(
-          conn,
-          `MATCH (f:File {id: '${esc}'})-[:IMPLEMENTS]->(s:Spec)
-           RETURN s.id AS id, s.title AS title, s.type AS type, s.status AS status`,
-        );
-        return jsonResult([...symRows, ...fileRows]);
-      } finally {
-        await closeDatabase(db, conn);
-      }
-    }
 
-    if (name === 'get_drift_report') {
-      const { db, conn } = await openDatabase(projectDir, true);
-      try {
-        const drift = await computeDrift(conn, projectDir);
-
-        // Rename suggestions only make sense for CodeSymbol drift, not file drift.
-        const { rows: symbolRows } = await queryAll(
-          conn,
-          'MATCH (c:CodeSymbol) RETURN c.id AS id, c.fqn AS fqn, c.file_path AS filePath',
-        );
-        const allSymbols = symbolRows.map((r) => ({
-          id: String(r['id']),
-          fqn: String(r['fqn']),
-          filePath: String(r['filePath']),
-          kind: 'function' as const,
-          lineStart: 0,
-          lineEnd: 0,
-          language: '',
-        }));
-
-        const suggestions = suggestRenames(drift, allSymbols);
-        const suggestionMap = new Map(
-          suggestions.map((s) => [`${s.specId}::${s.oldSymbolId}`, s]),
-        );
-        const enriched = drift.map((d) => ({
-          ...d,
-          suggestion: suggestionMap.get(`${d.specId}::${d.symbolId}`) ?? null,
-        }));
-
-        return jsonResult(enriched);
-      } finally {
-        await closeDatabase(db, conn);
-      }
-    }
 
     if (name === 'query_graph') {
       const cypher = String(a['cypher'] ?? '');
@@ -1007,85 +649,16 @@ export async function runMcp(options: { projectDir?: string } = {}): Promise<voi
       }
     }
 
-    if (name === 'create_spec') {
-      const config = loadConfig(projectDir);
-      const specsDir = path.resolve(projectDir, config.specsDir);
-      try {
-        const { filePath } = createSpec({
-          title: String(a['title'] ?? ''),
-          type: String(a['type'] ?? ''),
-          dir: typeof a['dir'] === 'string' ? a['dir'] : undefined,
-          symbols: Array.isArray(a['symbols']) ? (a['symbols'] as string[]) : undefined,
-          refs: Array.isArray(a['refs']) ? (a['refs'] as string[]) : undefined,
-          specsDir,
-        });
-        return textResult(`Created ${path.relative(projectDir, filePath)}`);
-      } catch (err) {
-        return textResult(`Error: ${(err as Error).message}`);
-      }
-    }
 
-    if (name === 'update_spec') {
-      const config = loadConfig(projectDir);
-      const specsDir = path.resolve(projectDir, config.specsDir);
-      const addSymbolIds = Array.isArray(a['addSymbols']) ? (a['addSymbols'] as string[]) : [];
-      const addSymbols = addSymbolIds.map((s) => ({ symbol: s, type: 'unknown' }));
-      try {
-        const { filePath } = updateSpec({
-          id: String(a['id'] ?? ''),
-          specsDir,
-          addSymbols: addSymbols.length > 0 ? addSymbols : undefined,
-          removeSymbols: Array.isArray(a['removeSymbols'])
-            ? (a['removeSymbols'] as string[])
-            : undefined,
-          addRefs: Array.isArray(a['addRefs']) ? (a['addRefs'] as string[]) : undefined,
-          removeRefs: Array.isArray(a['removeRefs']) ? (a['removeRefs'] as string[]) : undefined,
-          status: a['status'] !== undefined ? String(a['status']) : undefined,
-        });
-        return textResult(`Updated ${path.relative(projectDir, filePath)}`);
-      } catch (err) {
-        return textResult(`Error: ${(err as Error).message}`);
-      }
-    }
 
-    if (name === 'get_unlinked_specs') {
-      const { db, conn } = await openDatabase(projectDir, true);
-      try {
-        const { rows } = await queryAll(
-          conn,
-          `MATCH (s:Spec) WHERE NOT EXISTS { MATCH ()-[:IMPLEMENTS]->(s) }
-           RETURN s.id AS id, s.title AS title, s.type AS type, s.status AS status
-           ORDER BY s.id`,
-        );
-        return jsonResult(rows);
-      } finally {
-        await closeDatabase(db, conn);
-      }
-    }
 
-    if (name === 'get_multi_spec_symbols') {
-      const { db, conn } = await openDatabase(projectDir, true);
-      try {
-        const { rows } = await queryAll(
-          conn,
-          `MATCH (c:CodeSymbol)-[:IMPLEMENTS]->(s:Spec)
-           WITH c, collect({id: s.id, title: s.title, type: s.type}) AS specs
-           WHERE size(specs) > 1
-           RETURN c.id AS symbolId, c.fqn AS fqn, c.file_path AS filePath, specs
-           ORDER BY c.id`,
-        );
-        return jsonResult(rows);
-      } finally {
-        await closeDatabase(db, conn);
-      }
-    }
 
-    if (name === 'get_unspecced_symbols') {
+    if (name === 'get_undocumented_symbols') {
       const filePath = a['file_path'] !== undefined ? String(a['file_path']) : undefined;
       const { db, conn } = await openDatabase(projectDir, true);
       try {
         let cypher =
-          'MATCH (c:CodeSymbol) WHERE NOT EXISTS { MATCH (c)-[:IMPLEMENTS]->() }';
+          'MATCH (c:CodeSymbol) WHERE NOT EXISTS { MATCH (:Record)-[:ABOUT]->(c) }';
         if (filePath !== undefined) {
           const safe = escId(filePath);
           cypher += ` AND c.file_path = '${safe}'`;
@@ -1100,36 +673,29 @@ export async function runMcp(options: { projectDir?: string } = {}): Promise<voi
     }
 
     if (name === 'reindex') {
-      const config = loadConfig(projectDir);
-      const specsDir = path.resolve(projectDir, config.specsDir);
-      const { specs, errors } = parseAllSpecs(specsDir);
-      const { records, errors: recordErrors } = readRecords(projectDir);
+      const { records, errors } = readRecords(projectDir);
+      if (errors.length > 0) {
+        return textResult(
+          `Refusing to index — ${errors.length} invalid record(s). Run 'specgraph records check'.`,
+        );
+      }
       const { db, conn } = await openDatabase(projectDir);
       try {
-        const stats = await indexSpecs(conn, specs);
+        const cleared = await conn.query('MATCH (r:Record) DETACH DELETE r');
+        if (!Array.isArray(cleared)) cleared.close();
+        const stats = await indexRecords(conn, records, projectDir);
         const lines = [
-          `✓ Reindexed: ${stats.specs} specs, ${stats.symbols} symbols, ${stats.refs} refs, ${stats.implements} IMPLEMENTS edges, ${stats.references} REFERENCES edges`,
+          `✓ Indexed ${stats.records} record(s): ${stats.live} live, ${stats.about} subject link(s), ${stats.supersedes} supersede edge(s)`,
         ];
-        // indexSpecs recreates the schema, so records must be rebuilt with it.
-        if (recordErrors.length > 0) {
-          lines.push(
-            `Skipped records — ${recordErrors.length} invalid line(s); run 'specgraph records check'.`,
-          );
-        } else {
-          const rec = await indexRecords(conn, records);
-          lines.push(
-            `✓ Records: ${rec.records} indexed, ${rec.live} live, ${rec.about} subject link(s)`,
-          );
-          if (rec.unresolved.length > 0) {
-            lines.push(`⚠ ${rec.unresolved.length} unresolved subject(s) — run analyze, or the symbol moved.`);
-          }
+        if (stats.unresolved.length > 0) {
+          lines.push(`⚠ ${stats.unresolved.length} unresolved subject(s) — run 'specgraph analyze', or the symbol moved.`);
         }
-        if (errors.length > 0) lines.push(`Warnings: ${errors.join('; ')}`);
         return textResult(lines.join('\n'));
       } finally {
         await closeDatabase(db, conn);
       }
     }
+
 
     if (name === 'get_callers') {
       return handleGetCallers(projectDir, String(a['symbolId'] ?? ''));
@@ -1155,24 +721,7 @@ export async function runMcp(options: { projectDir?: string } = {}): Promise<voi
       return handleSearchSymbols(projectDir, String(a['query'] ?? ''), limit, kind);
     }
 
-    if (name === 'get_specs_by_ref') {
-      const url = String(a['url'] ?? '');
-      const { db, conn } = await openDatabase(projectDir, true);
-      try {
-        const { rows } = await queryAll(
-          conn,
-          `MATCH (s:Spec)-[:REFERENCES]->(r:Ref {id: '${escId(url)}'})
-           RETURN s.id AS id, s.title AS title, s.type AS type, s.status AS status ORDER BY s.id`,
-        );
-        return jsonResult(rows);
-      } finally {
-        await closeDatabase(db, conn);
-      }
-    }
 
-    if (name === 'get_specs_for_symbol_with_context') {
-      return handleGetSpecsForSymbolWithContext(projectDir, String(a['symbolId'] ?? ''));
-    }
 
     if (name === 'get_records_for_symbol') {
       return handleGetRecordsForSymbol(

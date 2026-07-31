@@ -1,6 +1,5 @@
 import path from 'node:path';
 import { openDatabase, closeDatabase, dbExists, queryAll, escId } from '../../core/db.js';
-import { loadConfig } from '../../core/config.js';
 
 interface HookInput {
   hook_event_name?: string;
@@ -151,10 +150,9 @@ export async function runContext(): Promise<void> {
     return;
   }
 
-  const config = loadConfig(projectDir);
   const relPaths = absPaths
     .map((p) => path.relative(projectDir, p))
-    .filter((rel) => !rel.startsWith(config.specsDir) && !rel.startsWith('..'));
+    .filter((rel) => !rel.startsWith('..'));
 
   if (relPaths.length === 0) {
     process.stdout.write(allowResponse());
@@ -163,32 +161,9 @@ export async function runContext(): Promise<void> {
 
   const { db, conn } = await openDatabase(projectDir, true);
   try {
-    const allSpecs: Array<{ specId: string; type: string; status: string }> = [];
-
-    for (const relPath of relPaths) {
-      const { rows: symbolRows } = await queryAll(
-        conn,
-        `MATCH (c:CodeSymbol {file_path: '${escId(relPath)}'})-[:IMPLEMENTS]->(s:Spec)
-         RETURN DISTINCT s.id AS specId, s.type AS type, s.status AS status`,
-      );
-      const { rows: fileRows } = await queryAll(
-        conn,
-        `MATCH (f:File {id: '${escId(relPath)}'})-[:IMPLEMENTS]->(s:Spec)
-         RETURN s.id AS specId, s.type AS type, s.status AS status`,
-      );
-      for (const r of [...symbolRows, ...fileRows]) {
-        allSpecs.push({
-          specId: String(r['specId']),
-          type: String(r['type']),
-          status: String(r['status']),
-        });
-      }
-    }
-
-    const unique = [...new Map(allSpecs.map((s) => [s.specId, s])).values()];
     const records = await fetchRecords(conn, relPaths);
 
-    if (unique.length === 0 && records.length === 0) {
+    if (records.length === 0) {
       process.stdout.write(allowResponse());
       return;
     }
@@ -197,22 +172,10 @@ export async function runContext(): Promise<void> {
     const sections: string[] = [];
 
     // Records carry their claims inline, so the agent needs no follow-up read.
-    if (records.length > 0) {
-      sections.push(
-        `[specgraph] Known about ${fileList} — read before editing:`,
-        ...formatRecords(records),
-      );
-    }
-
-    if (unique.length > 0) {
-      if (sections.length > 0) sections.push('');
-      sections.push(
-        `[specgraph] Specs covering ${fileList}:`,
-        ...unique.map((s) => `  • ${s.specId} [${s.type}]`),
-        '',
-        'Read the full spec if needed: get_spec("<specId>")',
-      );
-    }
+    sections.push(
+      `[specgraph] Known about ${fileList} — read before editing:`,
+      ...formatRecords(records),
+    );
 
     sections.push(
       '',

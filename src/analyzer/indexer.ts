@@ -6,25 +6,18 @@ import { fileURLToPath } from 'node:url';
 import type { Connection } from '@ladybugdb/core';
 import type { SpecGraphConfig } from '../types/config.js';
 import type { CodeSymbol, CallRef } from '../types/code.js';
-import type { ParsedSpec } from '../types/spec.js';
 import { walkFiles } from './walker.js';
 import { getParserForExtension, getExtensionsForLanguages } from './languages/index.js';
-import { resolveImplementations, findUnresolvedImplementations, suggestRenames } from './resolver.js';
-import type { RenameSuggestion } from './resolver.js';
 import { queryAll } from '../core/db.js';
 import type { ParseTask, ParseResult } from './parse-worker.js';
 
 export interface AnalysisStats {
   filesScanned: number;
   symbolsFound: number;
-  implementationsLinked: number;
   callEdgesCreated: number;
   containsEdgesCreated: number;
   fileNodesCreated: number;
   parseErrors: number;
-  unresolvedSymbols: number;
-  driftWarnings: string[];
-  renameSuggestions: RenameSuggestion[];
 }
 
 const BATCH_SIZE = 200;
@@ -194,34 +187,6 @@ async function insertCallsEdges(
   return resolved.length;
 }
 
-async function insertImplementsEdges(
-  conn: Connection,
-  links: Array<{ symbolId: string; specId: string; confidence: number }>,
-): Promise<void> {
-  const rows = links.map(({ symbolId, specId }) =>
-    `[${esc(symbolId)}, ${esc(specId)}]`,
-  );
-  await batchQuery(
-    conn,
-    rows,
-    (list) =>
-      `UNWIND [${list}] AS e MATCH (c:CodeSymbol {id: e[1]}), (s:Spec {id: e[2]}) CREATE (c)-[:IMPLEMENTS {confidence: 1.0}]->(s)`,
-  );
-}
-
-async function insertFileImplementsEdges(
-  conn: Connection,
-  edges: [string, string][],
-): Promise<void> {
-  const rows = edges.map(([fileId, specId]) => `[${esc(fileId)}, ${esc(specId)}]`);
-  await batchQuery(
-    conn,
-    rows,
-    (list) =>
-      `UNWIND [${list}] AS e MATCH (f:File {id: e[1]}), (s:Spec {id: e[2]}) CREATE (f)-[:IMPLEMENTS {confidence: 1.0}]->(s)`,
-  );
-}
-
 const WORKER_COUNT = Math.max(1, Math.min(os.cpus().length, 8));
 
 type ParseBatch = { allSymbols: CodeSymbol[]; allCallRefs: CallRef[]; parseErrors: number; scannedFiles: Map<string, string> };
@@ -339,58 +304,21 @@ async function parseWithWorkers(
   });
 }
 
-/** Hint appended to drift warnings when the symbol ID looks like a bare file path. */
-function driftHint(symbolId: string): string {
-  return symbolId.includes('::') ? '' : ' — no \'::\'separator; did you mean type: file?';
-}
-
-/** Separate file-type implements from code-symbol implements. */
-function partitionImplsByType(specs: ParsedSpec[]): {
-  fileImplsBySpecId: Map<string, string[]>;
-  specsForResolver: ParsedSpec[];
-} {
-  const fileImplsBySpecId = new Map<string, string[]>();
-  for (const spec of specs) {
-    for (const impl of spec.frontmatter.implements ?? []) {
-      if (impl.type === 'file') {
-        const list = fileImplsBySpecId.get(spec.id) ?? [];
-        list.push(impl.symbol);
-        fileImplsBySpecId.set(spec.id, list);
-      }
-    }
-  }
-  const specsForResolver = specs.map((spec) => ({
-    ...spec,
-    frontmatter: {
-      ...spec.frontmatter,
-      implements: (spec.frontmatter.implements ?? []).filter((i) => i.type !== 'file'),
-    },
-  }));
-  return { fileImplsBySpecId, specsForResolver };
-}
-
 /** Full rebuild — re-scans all files and rewrites the entire code graph. */
 export async function analyzeAndIndex(
   conn: Connection,
   projectDir: string,
-  specs: ParsedSpec[],
   config: SpecGraphConfig,
   onProgress?: (phase: 'scan' | 'index', n: number, total: number) => void,
 ): Promise<AnalysisStats> {
   const stats: AnalysisStats = {
     filesScanned: 0,
     symbolsFound: 0,
-    implementationsLinked: 0,
     callEdgesCreated: 0,
     containsEdgesCreated: 0,
     fileNodesCreated: 0,
     parseErrors: 0,
-    unresolvedSymbols: 0,
-    driftWarnings: [],
-    renameSuggestions: [],
   };
-
-  const { fileImplsBySpecId, specsForResolver } = partitionImplsByType(specs);
 
   const extensions = getExtensionsForLanguages(config.analyze.languages);
   if (extensions.length === 0) return stats;
@@ -428,37 +356,8 @@ export async function analyzeAndIndex(
   const containsPairs = buildContainsPairs(allSymbols);
   stats.containsEdgesCreated = await insertContainsEdges(conn, containsPairs);
 
-  const implLinks = resolveImplementations(allSymbols, specsForResolver);
-  await insertImplementsEdges(conn, implLinks);
-  stats.implementationsLinked += implLinks.length;
-
   stats.callEdgesCreated = await insertCallsEdges(conn, allCallRefs, allSymbols);
 
-  // Handle file-type implements
-  const fileImplEdges: [string, string][] = [];
-  for (const [specId, filePaths] of fileImplsBySpecId) {
-    for (const fileId of filePaths) {
-      const absPath = path.resolve(projectDir, fileId);
-      if (!fs.existsSync(absPath)) {
-        stats.driftWarnings.push(`${specId}: ${fileId} not found`);
-        stats.unresolvedSymbols++;
-        continue;
-      }
-      const ext = path.extname(fileId).toLowerCase();
-      if (!scannedFiles.has(fileId)) {
-        await insertFiles(conn, new Map([[fileId, ext]]));
-        stats.fileNodesCreated++;
-      }
-      fileImplEdges.push([fileId, specId]);
-    }
-  }
-  await insertFileImplementsEdges(conn, fileImplEdges);
-  stats.implementationsLinked += fileImplEdges.length;
-
-  const unresolved = findUnresolvedImplementations(allSymbols, specsForResolver);
-  stats.unresolvedSymbols += unresolved.length;
-  stats.driftWarnings.push(...unresolved.map((u) => `${u.specId}: ${u.symbolId} not found${driftHint(u.symbolId)}`));
-  stats.renameSuggestions = suggestRenames(unresolved, allSymbols);
 
   return stats;
 }
@@ -467,7 +366,6 @@ export async function analyzeAndIndex(
 export async function analyzeAndIndexIncremental(
   conn: Connection,
   projectDir: string,
-  specs: ParsedSpec[],
   config: SpecGraphConfig,
   changedPaths: Set<string>,
   deletedPaths: Set<string>,
@@ -476,17 +374,11 @@ export async function analyzeAndIndexIncremental(
   const stats: AnalysisStats = {
     filesScanned: 0,
     symbolsFound: 0,
-    implementationsLinked: 0,
     callEdgesCreated: 0,
     containsEdgesCreated: 0,
     fileNodesCreated: 0,
     parseErrors: 0,
-    unresolvedSymbols: 0,
-    driftWarnings: [],
-    renameSuggestions: [],
   };
-
-  const { fileImplsBySpecId, specsForResolver } = partitionImplsByType(specs);
 
   const toDelete = new Set([...changedPaths, ...deletedPaths]);
   for (const relPath of toDelete) {
@@ -536,44 +428,6 @@ export async function analyzeAndIndexIncremental(
     const allCurrentSymbols = [...existingSymbols, ...newSymbols];
 
     stats.callEdgesCreated = await insertCallsEdges(conn, newCallRefs, allCurrentSymbols);
-
-    const implLinks = resolveImplementations(newSymbols, specsForResolver);
-    await insertImplementsEdges(conn, implLinks);
-    stats.implementationsLinked += implLinks.length;
-  }
-
-  // File-type implements (always re-resolve for changed files)
-  const fileImplEdges: [string, string][] = [];
-  for (const [specId, filePaths] of fileImplsBySpecId) {
-    for (const fileId of filePaths) {
-      if (!changedPaths.has(fileId)) continue;
-      const absPath = path.resolve(projectDir, fileId);
-      if (!fs.existsSync(absPath)) {
-        stats.driftWarnings.push(`${specId}: ${fileId} not found`);
-        stats.unresolvedSymbols++;
-        continue;
-      }
-      const ext = path.extname(fileId).toLowerCase();
-      if (!newFiles.has(fileId)) {
-        await insertFiles(conn, new Map([[fileId, ext]]));
-        stats.fileNodesCreated++;
-      }
-      fileImplEdges.push([fileId, specId]);
-    }
-  }
-  await insertFileImplementsEdges(conn, fileImplEdges);
-  stats.implementationsLinked += fileImplEdges.length;
-
-  // Drift detection uses all symbols currently in the DB
-  const { rows: allSymRows } = await queryAll(conn, 'MATCH (c:CodeSymbol) RETURN c.id AS id');
-  const allSymbolIds = new Set(allSymRows.map((r) => String(r['id'])));
-  for (const spec of specsForResolver) {
-    for (const impl of spec.frontmatter.implements ?? []) {
-      if (!allSymbolIds.has(impl.symbol)) {
-        stats.driftWarnings.push(`${spec.id}: ${impl.symbol} not found${driftHint(impl.symbol)}`);
-        stats.unresolvedSymbols++;
-      }
-    }
   }
 
   return stats;

@@ -1,3 +1,5 @@
+import fs from 'node:fs';
+import path from 'node:path';
 import type { Connection } from '@ladybugdb/core';
 import type { KnowledgeRecord } from '../types/record.js';
 import { queryAll } from './db.js';
@@ -44,6 +46,7 @@ async function run(conn: Connection, cypher: string): Promise<void> {
 export async function indexRecords(
   conn: Connection,
   records: readonly KnowledgeRecord[],
+  projectDir?: string,
 ): Promise<RecordIndexStats> {
   const stats: RecordIndexStats = {
     records: 0,
@@ -85,13 +88,32 @@ export async function indexRecords(
 
   for (const r of records) {
     for (const subject of r.sb ?? []) {
-      const label = knownSymbols.has(subject)
+      let label = knownSymbols.has(subject)
         ? 'CodeSymbol'
         : knownFiles.has(subject)
           ? 'File'
           : null;
+
+      // A subject may name a real file the analyser never walked — a manifest,
+      // a config, a migration. Indexing it is not stubbing: the file exists, so
+      // drift still fires the moment it is deleted.
+      if (label === null && projectDir && !subject.includes('::')) {
+        const abs = path.resolve(projectDir, subject);
+        if (abs.startsWith(projectDir) && fs.existsSync(abs) && fs.statSync(abs).isFile()) {
+          const ext = path.extname(subject).toLowerCase();
+          await run(
+            conn,
+            `CREATE (:File {id: ${esc(subject)}, path: ${esc(subject)}, ext: ${esc(ext)}, kind: 'other'})`,
+          );
+          knownFiles.add(subject);
+          label = 'File';
+        }
+      }
+
       if (label === null) {
-        stats.unresolved.push({ recordId: r.id, subject });
+        // A superseded record legitimately points at code that is gone — that
+        // is usually *why* it was superseded. Only live records can drift.
+        if (live.has(r.id)) stats.unresolved.push({ recordId: r.id, subject });
         continue;
       }
       await run(

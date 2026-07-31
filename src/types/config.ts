@@ -8,12 +8,10 @@ export interface AnalyzeConfig {
 }
 
 export interface SpecGraphConfig {
-  specsDir: string;
   analyze: AnalyzeConfig;
 }
 
 export const DEFAULT_CONFIG: SpecGraphConfig = {
-  specsDir: 'specs',
   analyze: {
     include: ['src'],
     exclude: ['node_modules', 'dist', '.git', 'vendor', 'build', 'coverage'],

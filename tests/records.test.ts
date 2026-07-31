@@ -15,8 +15,7 @@ import {
   knowledgePath,
 } from '../src/core/records.js';
 import { indexRecords, provenanceKind } from '../src/core/record-indexer.js';
-import { openDatabase, closeDatabase, queryAll } from '../src/core/db.js';
-import { indexSpecs } from '../src/core/indexer.js';
+import { openDatabase, closeDatabase, queryAll, dropAndRecreateSchema } from '../src/core/db.js';
 import type { KnowledgeRecord } from '../src/types/record.js';
 import type { Database, Connection } from '@ladybugdb/core';
 
@@ -291,7 +290,7 @@ describe('record MCP handlers', () => {
     dbDir = fs.mkdtempSync(path.join(os.tmpdir(), 'specgraph-recmcp-'));
     fs.mkdirSync(path.join(dbDir, '.specgraph'), { recursive: true });
     const { db, conn } = await openDatabase(dbDir);
-    await indexSpecs(conn, []);
+    await dropAndRecreateSchema(conn);
     for (const [id, fqn] of [
       ['src/a.ts::Svc', 'Svc'],
       ['src/a.ts::Svc.run', 'Svc.run'],
@@ -458,7 +457,7 @@ describe('indexRecords', () => {
     dbDir = fs.mkdtempSync(path.join(os.tmpdir(), 'specgraph-recidx-'));
     fs.mkdirSync(path.join(dbDir, '.specgraph'), { recursive: true });
     ({ db, conn } = await openDatabase(dbDir));
-    await indexSpecs(conn, []); // drops + recreates schema
+    await dropAndRecreateSchema(conn);
     const r = await conn.query(
       `CREATE (:CodeSymbol { id: 'src/a.ts::Foo', fqn: 'Foo', symbol_type: 'class', file_path: 'src/a.ts', line_start: 0, line_end: 0, language: 'typescript' })`,
     );
@@ -533,6 +532,23 @@ describe('indexRecords', () => {
       'MATCH (r:Record) WHERE r.live RETURN r.id AS id',
     );
     expect(rows.map((r) => r['id'])).toEqual(['bbb222']);
+  });
+
+  it('does not report unresolved subjects for superseded records', async () => {
+    const stats = await indexRecords(conn, [
+      rec({ id: 'aaa111', sb: ['src/gone.ts::Vanished'] }),
+      rec({ id: 'bbb222', sb: ['src/a.ts::Foo'], ss: 'aaa111' }),
+    ]);
+    // aaa111 points at deleted code, but that is why it was superseded.
+    expect(stats.unresolved).toEqual([]);
+  });
+
+  it('still reports unresolved subjects for live records', async () => {
+    const stats = await indexRecords(conn, [
+      rec({ id: 'aaa111', sb: ['src/gone.ts::Vanished'] }),
+      rec({ id: 'bbb222', sb: ['src/a.ts::Foo'] }),
+    ]);
+    expect(stats.unresolved).toEqual([{ recordId: 'aaa111', subject: 'src/gone.ts::Vanished' }]);
   });
 
   it('skips a dangling supersedes without failing', async () => {

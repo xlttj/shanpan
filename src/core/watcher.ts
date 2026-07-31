@@ -26,7 +26,7 @@ function shouldIgnore(relPath: string, excludes: string[]): boolean {
 }
 
 export interface WatchOptions {
-  onFlush: (changedPaths: string[]) => Promise<{ filesScanned: number; driftCount: number }>;
+  onFlush: (changedPaths: string[]) => Promise<{ filesScanned: number }>;
   log?: (line: string) => void;
 }
 
@@ -63,14 +63,6 @@ export async function watchAndReindex(
     }
   }
 
-  // Add specsDir only when it is not already covered by an include root.
-  const specsDirAbs = path.resolve(projectDir, config.specsDir);
-  const coveredByInclude = [...watchRoots].some(
-    (root) => specsDirAbs === root || specsDirAbs.startsWith(root + path.sep),
-  );
-  if (!coveredByInclude) {
-    watchRoots.add(specsDirAbs);
-  }
 
   // Absolute-path ignore list: passed to each subscription for defence-in-depth
   // against nested excluded directories (e.g. src/node_modules).
@@ -104,12 +96,10 @@ export async function watchAndReindex(
     if (paths.length === 0) return;
     flushing = true;
     try {
-      const { filesScanned, driftCount } = await options.onFlush(paths);
+      const { filesScanned } = await options.onFlush(paths);
       log(
         chalk.gray(
-          `[${timestamp()}] reindexed ${filesScanned} file${
-            filesScanned === 1 ? '' : 's'
-          } · ${driftCount} drift warning${driftCount === 1 ? '' : 's'}`,
+          `[${timestamp()}] reindexed ${filesScanned} file${filesScanned === 1 ? '' : 's'}`,
         ),
       );
     } catch (err) {
