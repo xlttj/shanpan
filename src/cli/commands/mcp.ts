@@ -13,6 +13,16 @@ import { createSpec, updateSpec, ALLOWED_SPEC_TYPES } from '../../core/spec-writ
 import { indexSpecs } from '../../core/indexer.js';
 import { suggestRenames } from '../../analyzer/resolver.js';
 import { computeDrift } from '../../core/drift.js';
+import {
+  readRecords,
+  appendRecords,
+  liveIds,
+  nextId,
+  formatTs,
+  validateRecord,
+} from '../../core/records.js';
+import { indexRecords } from '../../core/record-indexer.js';
+import { RECORD_KINDS, type KnowledgeRecord, type RecordKind } from '../../types/record.js';
 
 const MUTATING_KEYWORDS = /^\s*(CREATE|MERGE|SET|DELETE|REMOVE|DROP|ALTER|CALL)\b/i;
 
@@ -244,6 +254,193 @@ export async function handleSearchSymbols(
   } finally {
     await closeDatabase(db, conn);
   }
+}
+
+const RECORD_RETURN =
+  `r.id AS id, r.kind AS kind, r.claim AS claim, r.because AS because,
+   r.given AS given, r.when_ AS whenClause, r.then_ AS thenClause,
+   r.provenance AS provenance, r.ts AS ts`;
+
+/**
+ * Records attached to a symbol, to its containing file, and — when the symbol
+ * is a method — to its parent class. Mirrors what the PreToolUse hook injects,
+ * so an agent can ask for the same knowledge mid-task.
+ */
+export async function handleGetRecordsForSymbol(
+  projectDir: string,
+  symbolId: string,
+  includeSuperseded = false,
+): Promise<{ content: { type: 'text'; text: string }[] }> {
+  const { db, conn } = await openDatabase(projectDir, true);
+  try {
+    const sep = symbolId.indexOf('::');
+    const filePath = sep === -1 ? symbolId : symbolId.slice(0, sep);
+    const liveFilter = includeSuperseded ? '' : 'AND r.live ';
+
+    const targets = new Set<string>([symbolId, filePath]);
+    // A method inherits knowledge recorded against its class.
+    if (sep !== -1) {
+      let fqn = symbolId.slice(sep + 2);
+      while (fqn.includes('.')) {
+        fqn = fqn.slice(0, fqn.lastIndexOf('.'));
+        targets.add(`${filePath}::${fqn}`);
+      }
+    }
+
+    const byId = new Map<string, Record<string, unknown>>();
+    for (const target of targets) {
+      const { rows } = await queryAll(
+        conn,
+        `MATCH (r:Record)-[:ABOUT]->(t) WHERE t.id = '${escId(target)}' ${liveFilter}
+         RETURN DISTINCT ${RECORD_RETURN}, t.id AS subject`,
+      );
+      for (const row of rows) byId.set(String(row['id']), row);
+    }
+    return jsonResult([...byId.values()]);
+  } finally {
+    await closeDatabase(db, conn);
+  }
+}
+
+/** Substring search over claim and because. Filtered in TS to avoid dialect assumptions. */
+export async function handleSearchRecords(
+  projectDir: string,
+  query: string,
+  limitRequested = 20,
+  kind?: string,
+): Promise<{ content: { type: 'text'; text: string }[] }> {
+  if (!query) return jsonResult([]);
+  const limit = Math.max(1, Math.min(100, Math.floor(limitRequested)));
+  const { db, conn } = await openDatabase(projectDir, true);
+  try {
+    const kindFilter =
+      kind && (RECORD_KINDS as readonly string[]).includes(kind)
+        ? `AND r.kind = '${escId(kind)}' `
+        : '';
+    const { rows } = await queryAll(
+      conn,
+      `MATCH (r:Record) WHERE r.live ${kindFilter}RETURN ${RECORD_RETURN} LIMIT 10000`,
+    );
+    const needle = query.toLowerCase();
+    const hits = rows.filter((row) => {
+      const hay = `${String(row['claim'] ?? '')} ${String(row['because'] ?? '')}`.toLowerCase();
+      return hay.includes(needle);
+    });
+    return jsonResult(hits.slice(0, limit));
+  } finally {
+    await closeDatabase(db, conn);
+  }
+}
+
+/** All live records of one kind — 'rejected' and 'gotcha' are the high-value reads. */
+export async function handleGetRecordsByKind(
+  projectDir: string,
+  kind: string,
+): Promise<{ content: { type: 'text'; text: string }[] }> {
+  if (!(RECORD_KINDS as readonly string[]).includes(kind)) {
+    return textResult(`Unknown kind '${kind}'. Expected one of: ${RECORD_KINDS.join(', ')}`);
+  }
+  const { db, conn } = await openDatabase(projectDir, true);
+  try {
+    const { rows } = await queryAll(
+      conn,
+      `MATCH (r:Record) WHERE r.live AND r.kind = '${escId(kind)}'
+       RETURN ${RECORD_RETURN} ORDER BY r.ts DESC`,
+    );
+    return jsonResult(rows);
+  } finally {
+    await closeDatabase(db, conn);
+  }
+}
+
+/**
+ * Subjects that resolve to no node — the record-level equivalent of spec drift.
+ * Recomputed from disk rather than the graph, so it stays correct even when
+ * the graph is stale.
+ */
+export async function handleGetRecordDrift(
+  projectDir: string,
+): Promise<{ content: { type: 'text'; text: string }[] }> {
+  const { records, errors } = readRecords(projectDir);
+  const { db, conn } = await openDatabase(projectDir, true);
+  try {
+    const { rows: symbolRows } = await queryAll(conn, 'MATCH (c:CodeSymbol) RETURN c.id AS id');
+    const known = new Set(symbolRows.map((r) => String(r['id'])));
+    const { rows: fileRows } = await queryAll(conn, 'MATCH (f:File) RETURN f.id AS id');
+    for (const r of fileRows) known.add(String(r['id']));
+
+    const live = liveIds(records);
+    const unresolved: { recordId: string; subject: string; claim: string }[] = [];
+    for (const rec of records) {
+      if (!live.has(rec.id)) continue;
+      for (const subject of rec.sb ?? []) {
+        if (!known.has(subject)) {
+          unresolved.push({ recordId: rec.id, subject, claim: rec.cl });
+        }
+      }
+    }
+    return jsonResult({ unresolved, invalidRecords: errors });
+  } finally {
+    await closeDatabase(db, conn);
+  }
+}
+
+export interface AddRecordArgs {
+  kind: string;
+  claim: string;
+  because?: string;
+  subjects?: string[];
+  provenance?: string;
+  given?: string;
+  when?: string;
+  then?: string;
+  supersedes?: string;
+}
+
+/**
+ * Append one record. Validates before touching disk so a malformed write
+ * cannot corrupt the knowledge file mid-session.
+ */
+export async function handleAddRecord(
+  projectDir: string,
+  args: AddRecordArgs,
+): Promise<{ content: { type: 'text'; text: string }[] }> {
+  const { records, errors } = readRecords(projectDir);
+  if (errors.length > 0) {
+    return textResult(
+      `Refusing to append — the knowledge file has ${errors.length} invalid record(s). ` +
+        `Run 'specgraph records check' to see them.`,
+    );
+  }
+  if (!(RECORD_KINDS as readonly string[]).includes(args.kind)) {
+    return textResult(`Unknown kind '${args.kind}'. Expected one of: ${RECORD_KINDS.join(', ')}`);
+  }
+
+  const taken = new Set(records.map((r) => r.id));
+  const rec: KnowledgeRecord = {
+    id: nextId(taken),
+    kn: args.kind as RecordKind,
+    cl: args.claim,
+    pv: args.provenance ?? 'a',
+    ts: formatTs(new Date()),
+  };
+  if (args.subjects && args.subjects.length > 0) rec.sb = args.subjects;
+  if (args.because) rec.bc = args.because;
+  if (args.given) rec.gv = args.given;
+  if (args.when) rec.wn = args.when;
+  if (args.then) rec.tn = args.then;
+  if (args.supersedes) rec.ss = args.supersedes;
+
+  const problems = validateRecord(rec, 0);
+  if (problems.length > 0) {
+    return textResult(`Record is not valid:\n${problems.map((p) => `  - ${p.message}`).join('\n')}`);
+  }
+  if (args.supersedes && !taken.has(args.supersedes)) {
+    return textResult(`Cannot supersede '${args.supersedes}' — no such record.`);
+  }
+
+  appendRecords(projectDir, [rec]);
+  return textResult(`Created record ${rec.id} (${rec.kn}). Call reindex to make it queryable.`);
 }
 
 export async function handleGetSpecsForSymbolWithContext(
@@ -576,6 +773,83 @@ export async function runMcp(options: { projectDir?: string } = {}): Promise<voi
         inputSchema: { type: 'object', properties: {} },
       },
       {
+        name: 'get_records_for_symbol',
+        description:
+          'Knowledge records attached to a symbol, its containing file, and (for a method) its parent class. This is the same knowledge the PreToolUse hook injects. Kinds: gotcha and constraint are traps and invariants; rejected says what was already tried and abandoned; decision carries reasoning you should not re-litigate.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            symbolId: {
+              type: 'string',
+              description: 'Symbol ID (e.g. "src/core/drift.ts::computeDrift") or bare file path',
+            },
+            includeSuperseded: {
+              type: 'boolean',
+              description: 'Include records that have been replaced (default false)',
+            },
+          },
+          required: ['symbolId'],
+        },
+      },
+      {
+        name: 'search_records',
+        description: 'Substring search over record claims and reasons.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            query: { type: 'string', description: 'Text to look for' },
+            kind: { type: 'string', enum: [...RECORD_KINDS], description: 'Optional kind filter' },
+            limit: { type: 'number', description: 'Max results (default 20, capped at 100)' },
+          },
+          required: ['query'],
+        },
+      },
+      {
+        name: 'get_records_by_kind',
+        description:
+          "All live records of one kind, newest first. Use 'rejected' before proposing an approach and 'gotcha' before touching unfamiliar code.",
+        inputSchema: {
+          type: 'object',
+          properties: {
+            kind: { type: 'string', enum: [...RECORD_KINDS], description: 'Record kind' },
+          },
+          required: ['kind'],
+        },
+      },
+      {
+        name: 'add_record',
+        description:
+          'Append a knowledge record. Use when you learn something durable: a trap, an invariant, a decision and its reason, or an approach that was tried and abandoned. Set provenance to u when the user stated it, a when you observed it while working, i when you inferred it without a hard source. given/when/then are only valid on kind behavior, where when and then are required.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            kind: { type: 'string', enum: [...RECORD_KINDS], description: 'Record kind' },
+            claim: { type: 'string', description: 'The claim; for behavior, the scenario name' },
+            because: { type: 'string', description: 'Why the claim holds — omit rather than invent' },
+            subjects: {
+              type: 'array',
+              items: { type: 'string' },
+              description: 'Symbol IDs or file paths this record is about',
+            },
+            provenance: {
+              type: 'string',
+              description: 'u | a | i | g:<sha> | t:<path> | n:<path>:<line> | d:<path>',
+            },
+            given: { type: 'string', description: 'behavior only: precondition' },
+            when: { type: 'string', description: 'behavior only: single triggering event' },
+            then: { type: 'string', description: 'behavior only: expected outcome' },
+            supersedes: { type: 'string', description: 'Record id this one replaces' },
+          },
+          required: ['kind', 'claim'],
+        },
+      },
+      {
+        name: 'get_record_drift',
+        description:
+          'Record subjects that no longer resolve to any symbol or file, plus any records that fail validation.',
+        inputSchema: { type: 'object', properties: {} },
+      },
+      {
         name: 'get_specs_for_symbol_with_context',
         description:
           'Get specs for a symbol AND its containing class/file hierarchy AND its 1-hop call-graph neighbours. Returns results grouped by scope (symbol, parent, class, file, callers, callees), with empty scopes omitted. Callers/callees entries include a viaSymbolId field showing which neighbour linked the spec.',
@@ -829,12 +1103,27 @@ export async function runMcp(options: { projectDir?: string } = {}): Promise<voi
       const config = loadConfig(projectDir);
       const specsDir = path.resolve(projectDir, config.specsDir);
       const { specs, errors } = parseAllSpecs(specsDir);
+      const { records, errors: recordErrors } = readRecords(projectDir);
       const { db, conn } = await openDatabase(projectDir);
       try {
         const stats = await indexSpecs(conn, specs);
         const lines = [
           `✓ Reindexed: ${stats.specs} specs, ${stats.symbols} symbols, ${stats.refs} refs, ${stats.implements} IMPLEMENTS edges, ${stats.references} REFERENCES edges`,
         ];
+        // indexSpecs recreates the schema, so records must be rebuilt with it.
+        if (recordErrors.length > 0) {
+          lines.push(
+            `Skipped records — ${recordErrors.length} invalid line(s); run 'specgraph records check'.`,
+          );
+        } else {
+          const rec = await indexRecords(conn, records);
+          lines.push(
+            `✓ Records: ${rec.records} indexed, ${rec.live} live, ${rec.about} subject link(s)`,
+          );
+          if (rec.unresolved.length > 0) {
+            lines.push(`⚠ ${rec.unresolved.length} unresolved subject(s) — run analyze, or the symbol moved.`);
+          }
+        }
         if (errors.length > 0) lines.push(`Warnings: ${errors.join('; ')}`);
         return textResult(lines.join('\n'));
       } finally {
@@ -883,6 +1172,42 @@ export async function runMcp(options: { projectDir?: string } = {}): Promise<voi
 
     if (name === 'get_specs_for_symbol_with_context') {
       return handleGetSpecsForSymbolWithContext(projectDir, String(a['symbolId'] ?? ''));
+    }
+
+    if (name === 'get_records_for_symbol') {
+      return handleGetRecordsForSymbol(
+        projectDir,
+        String(a['symbolId'] ?? ''),
+        a['includeSuperseded'] === true,
+      );
+    }
+
+    if (name === 'search_records') {
+      const limit = typeof a['limit'] === 'number' ? (a['limit'] as number) : 20;
+      const kind = typeof a['kind'] === 'string' ? (a['kind'] as string) : undefined;
+      return handleSearchRecords(projectDir, String(a['query'] ?? ''), limit, kind);
+    }
+
+    if (name === 'get_records_by_kind') {
+      return handleGetRecordsByKind(projectDir, String(a['kind'] ?? ''));
+    }
+
+    if (name === 'get_record_drift') {
+      return handleGetRecordDrift(projectDir);
+    }
+
+    if (name === 'add_record') {
+      return handleAddRecord(projectDir, {
+        kind: String(a['kind'] ?? ''),
+        claim: String(a['claim'] ?? ''),
+        because: typeof a['because'] === 'string' ? a['because'] : undefined,
+        subjects: Array.isArray(a['subjects']) ? (a['subjects'] as string[]) : undefined,
+        provenance: typeof a['provenance'] === 'string' ? a['provenance'] : undefined,
+        given: typeof a['given'] === 'string' ? a['given'] : undefined,
+        when: typeof a['when'] === 'string' ? a['when'] : undefined,
+        then: typeof a['then'] === 'string' ? a['then'] : undefined,
+        supersedes: typeof a['supersedes'] === 'string' ? a['supersedes'] : undefined,
+      });
     }
 
     return textResult(`Unknown tool: ${name}`);

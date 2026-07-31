@@ -282,6 +282,152 @@ describe('provenanceKind', () => {
   });
 });
 
+// ─── MCP handlers ────────────────────────────────────────────────────────────
+
+describe('record MCP handlers', () => {
+  let dbDir: string;
+
+  beforeEach(async () => {
+    dbDir = fs.mkdtempSync(path.join(os.tmpdir(), 'specgraph-recmcp-'));
+    fs.mkdirSync(path.join(dbDir, '.specgraph'), { recursive: true });
+    const { db, conn } = await openDatabase(dbDir);
+    await indexSpecs(conn, []);
+    for (const [id, fqn] of [
+      ['src/a.ts::Svc', 'Svc'],
+      ['src/a.ts::Svc.run', 'Svc.run'],
+    ]) {
+      const r = await conn.query(
+        `CREATE (:CodeSymbol { id: '${id}', fqn: '${fqn}', symbol_type: 'class', file_path: 'src/a.ts', line_start: 0, line_end: 0, language: 'typescript' })`,
+      );
+      if (!Array.isArray(r)) r.close();
+    }
+    const rf = await conn.query(
+      `CREATE (:File { id: 'src/a.ts', path: 'src/a.ts', ext: '.ts', kind: 'source' })`,
+    );
+    if (!Array.isArray(rf)) rf.close();
+
+    const recs: KnowledgeRecord[] = [
+      rec({ id: 'aaa111', kn: 'gotcha', cl: 'method level trap', sb: ['src/a.ts::Svc.run'] }),
+      rec({ id: 'bbb222', kn: 'constraint', cl: 'class level invariant', sb: ['src/a.ts::Svc'] }),
+      rec({ id: 'ccc333', kn: 'intent', cl: 'file level purpose', sb: ['src/a.ts'] }),
+      rec({ id: 'ddd444', kn: 'rejected', cl: 'tried caching results', bc: 'invalidation was unsolvable' }),
+      rec({ id: 'eee555', kn: 'decision', cl: 'old ruling', sb: ['src/a.ts::Svc'] }),
+      rec({ id: 'fff666', kn: 'decision', cl: 'new ruling', sb: ['src/a.ts::Svc'], ss: 'eee555' }),
+    ];
+    appendRecords(dbDir, recs);
+    await indexRecords(conn, recs);
+    await closeDatabase(db, conn);
+  });
+
+  afterEach(() => {
+    fs.rmSync(dbDir, { recursive: true, force: true });
+  });
+
+  function parsed(res: { content: { type: string; text: string }[] }): any {
+    return JSON.parse(res.content[0]!.text);
+  }
+
+  it('walks method → class → file when fetching records for a symbol', async () => {
+    const { handleGetRecordsForSymbol } = await import('../src/cli/commands/mcp.js');
+    const out = parsed(await handleGetRecordsForSymbol(dbDir, 'src/a.ts::Svc.run'));
+    const ids = out.map((r: { id: string }) => r.id).sort();
+    expect(ids).toContain('aaa111'); // the method itself
+    expect(ids).toContain('bbb222'); // inherited from the class
+    expect(ids).toContain('ccc333'); // inherited from the file
+  });
+
+  it('excludes superseded records by default', async () => {
+    const { handleGetRecordsForSymbol } = await import('../src/cli/commands/mcp.js');
+    const out = parsed(await handleGetRecordsForSymbol(dbDir, 'src/a.ts::Svc'));
+    const ids = out.map((r: { id: string }) => r.id);
+    expect(ids).toContain('fff666');
+    expect(ids).not.toContain('eee555');
+  });
+
+  it('includes superseded records on request', async () => {
+    const { handleGetRecordsForSymbol } = await import('../src/cli/commands/mcp.js');
+    const out = parsed(await handleGetRecordsForSymbol(dbDir, 'src/a.ts::Svc', true));
+    expect(out.map((r: { id: string }) => r.id)).toContain('eee555');
+  });
+
+  it('returns each record once even when several subjects match', async () => {
+    const { handleGetRecordsForSymbol } = await import('../src/cli/commands/mcp.js');
+    const out = parsed(await handleGetRecordsForSymbol(dbDir, 'src/a.ts::Svc.run'));
+    const ids = out.map((r: { id: string }) => r.id);
+    expect(new Set(ids).size).toBe(ids.length);
+  });
+
+  it('searches claim and because text', async () => {
+    const { handleSearchRecords } = await import('../src/cli/commands/mcp.js');
+    expect(parsed(await handleSearchRecords(dbDir, 'invalidation')).map((r: { id: string }) => r.id))
+      .toEqual(['ddd444']);
+    expect(parsed(await handleSearchRecords(dbDir, 'TRAP')).map((r: { id: string }) => r.id))
+      .toEqual(['aaa111']);
+  });
+
+  it('returns nothing for an empty search', async () => {
+    const { handleSearchRecords } = await import('../src/cli/commands/mcp.js');
+    expect(parsed(await handleSearchRecords(dbDir, ''))).toEqual([]);
+  });
+
+  it('filters by kind', async () => {
+    const { handleGetRecordsByKind } = await import('../src/cli/commands/mcp.js');
+    const out = parsed(await handleGetRecordsByKind(dbDir, 'rejected'));
+    expect(out.map((r: { id: string }) => r.id)).toEqual(['ddd444']);
+  });
+
+  it('rejects an unknown kind with a helpful message', async () => {
+    const { handleGetRecordsByKind } = await import('../src/cli/commands/mcp.js');
+    const res = await handleGetRecordsByKind(dbDir, 'nonsense');
+    expect(res.content[0]!.text).toContain('Unknown kind');
+  });
+
+  it('appends a valid record via add_record', async () => {
+    const { handleAddRecord } = await import('../src/cli/commands/mcp.js');
+    const res = await handleAddRecord(dbDir, {
+      kind: 'gotcha',
+      claim: 'freshly learned',
+      because: 'observed in this session',
+      subjects: ['src/a.ts::Svc'],
+    });
+    expect(res.content[0]!.text).toContain('Created record');
+    const { records } = readRecords(dbDir);
+    expect(records.some((r) => r.cl === 'freshly learned')).toBe(true);
+  });
+
+  it('refuses a behavior record missing when/then', async () => {
+    const { handleAddRecord } = await import('../src/cli/commands/mcp.js');
+    const res = await handleAddRecord(dbDir, { kind: 'behavior', claim: 'incomplete scenario' });
+    expect(res.content[0]!.text).toContain('not valid');
+    const { records } = readRecords(dbDir);
+    expect(records.some((r) => r.cl === 'incomplete scenario')).toBe(false);
+  });
+
+  it('refuses to supersede a record that does not exist', async () => {
+    const { handleAddRecord } = await import('../src/cli/commands/mcp.js');
+    const res = await handleAddRecord(dbDir, { kind: 'decision', claim: 'x', supersedes: 'nope99' });
+    expect(res.content[0]!.text).toContain('no such record');
+  });
+
+  it('reports unresolved subjects as record drift', async () => {
+    const { handleAddRecord, handleGetRecordDrift } = await import('../src/cli/commands/mcp.js');
+    await handleAddRecord(dbDir, {
+      kind: 'gotcha',
+      claim: 'points at vanished code',
+      subjects: ['src/gone.ts::Vanished'],
+    });
+    const out = parsed(await handleGetRecordDrift(dbDir));
+    expect(out.unresolved.map((u: { subject: string }) => u.subject)).toEqual(['src/gone.ts::Vanished']);
+  });
+
+  it('reports no drift when every subject resolves', async () => {
+    const { handleGetRecordDrift } = await import('../src/cli/commands/mcp.js');
+    const out = parsed(await handleGetRecordDrift(dbDir));
+    expect(out.unresolved).toEqual([]);
+    expect(out.invalidRecords).toEqual([]);
+  });
+});
+
 // ─── schema bookkeeping ──────────────────────────────────────────────────────
 
 describe('schema table names', () => {
