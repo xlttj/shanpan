@@ -86,6 +86,25 @@ export const openCodeIntegration: IdeIntegration = {
 
 export const IDE_INTEGRATIONS: IdeIntegration[] = [claudeCodeIntegration, cursorIntegration, openCodeIntegration];
 
+/**
+ * Concatenate two arrays but drop structurally-identical entries. This keeps
+ * the merge idempotent: re-running init/upgrade must not stack another copy of
+ * the specgraph hooks, and a settings file that already accumulated duplicates
+ * from an earlier (appending) version self-heals on the next run. User-added
+ * entries differ structurally from ours and are always preserved.
+ */
+function mergeArrays(existing: unknown[], incoming: unknown[]): unknown[] {
+  const seen = new Set<string>();
+  const result: unknown[] = [];
+  for (const item of [...existing, ...incoming]) {
+    const key = JSON.stringify(item);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    result.push(item);
+  }
+  return result;
+}
+
 function deepMerge(target: Record<string, unknown>, source: Record<string, unknown>): Record<string, unknown> {
   const result: Record<string, unknown> = { ...target };
   for (const [key, value] of Object.entries(source)) {
@@ -102,7 +121,7 @@ function deepMerge(target: Record<string, unknown>, source: Record<string, unkno
         value as Record<string, unknown>,
       );
     } else if (Array.isArray(value) && Array.isArray(result[key])) {
-      result[key] = [...(result[key] as unknown[]), ...value];
+      result[key] = mergeArrays(result[key] as unknown[], value);
     } else {
       result[key] = value;
     }
