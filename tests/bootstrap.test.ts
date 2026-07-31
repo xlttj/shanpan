@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   scanMarkers,
+  buildMarkerRegex,
   parseReverts,
   buildGitLogArgs,
   scanAdr,
@@ -59,6 +60,26 @@ describe('scanMarkers', () => {
     const claim = scanMarkers('a.ts', `// HACK: ${long}`)[0]?.claim ?? '';
     expect(claim.length).toBeLessThanOrEqual(MAX_CLAIM);
     expect(claim.endsWith('…')).toBe(true);
+  });
+
+  it('matches a project-specific marker when supplied', () => {
+    const src = '// KLUDGE: single-threaded on purpose\n// HACK: also this';
+    const out = scanMarkers('a.ts', src, ['KLUDGE']);
+    // Only the custom marker is in the set here — HACK is not passed.
+    expect(out.map((m) => m.marker)).toEqual(['KLUDGE']);
+  });
+
+  it('returns nothing when the marker set is empty', () => {
+    expect(scanMarkers('a.ts', '// HACK: x', [])).toEqual([]);
+  });
+});
+
+describe('buildMarkerRegex', () => {
+  it('treats a marker with regex metacharacters as a literal', () => {
+    const re = buildMarkerRegex(['C++']);
+    expect(re.test('// C++: careful with ABI')).toBe(true);
+    // The escaped '+' must not turn into a quantifier that matches "C".
+    expect(re.test('// Cc: not a marker')).toBe(false);
   });
 });
 

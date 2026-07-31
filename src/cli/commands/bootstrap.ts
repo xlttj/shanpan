@@ -20,6 +20,7 @@ import {
   buildGitLogArgs,
   scanAdr,
   dedupKey,
+  DEFAULT_MARKERS,
   ADR_DIRS,
 } from '../../core/bootstrap.js';
 
@@ -37,28 +38,64 @@ function gitLog(projectDir: string, limit: number): string | null {
   }
 }
 
-function findAdrFiles(projectDir: string): string[] {
+/** Collect .md files directly inside a directory (one level — ADR dirs are flat). */
+function mdFilesIn(projectDir: string, relDir: string): string[] {
   const found: string[] = [];
-  for (const dir of ADR_DIRS) {
-    const abs = path.join(projectDir, dir);
-    let entries: fs.Dirent[];
-    try {
-      entries = fs.readdirSync(abs, { withFileTypes: true });
-    } catch {
-      continue;
-    }
-    for (const e of entries) {
-      if (e.isFile() && e.name.toLowerCase().endsWith('.md') && e.name.toLowerCase() !== 'readme.md') {
-        found.push(path.join(dir, e.name));
-      }
+  let entries: fs.Dirent[];
+  try {
+    entries = fs.readdirSync(path.join(projectDir, relDir), { withFileTypes: true });
+  } catch {
+    return found;
+  }
+  for (const e of entries) {
+    const lower = e.name.toLowerCase();
+    if (e.isFile() && lower.endsWith('.md') && lower !== 'readme.md') {
+      found.push(path.join(relDir, e.name));
     }
   }
-  return found.sort();
+  return found;
+}
+
+/**
+ * Resolve the set of decision documents to scan: auto-detected ADR directories
+ * (unless disabled) plus whatever the caller pointed at. A --doc entry may be a
+ * single file or a directory of Markdown. Everything is returned as a
+ * project-relative path, deduped.
+ */
+function resolveDocs(projectDir: string, docs: string[], includeAdr: boolean): string[] {
+  const out = new Set<string>();
+
+  if (includeAdr) {
+    for (const dir of ADR_DIRS) for (const f of mdFilesIn(projectDir, dir)) out.add(f);
+  }
+
+  for (const entry of docs) {
+    const abs = path.resolve(projectDir, entry);
+    let stat: fs.Stats;
+    try {
+      stat = fs.statSync(abs);
+    } catch {
+      continue; // caller pointed at something that is not there
+    }
+    if (stat.isFile()) {
+      out.add(path.relative(projectDir, abs));
+    } else if (stat.isDirectory()) {
+      for (const f of mdFilesIn(projectDir, path.relative(projectDir, abs))) out.add(f);
+    }
+  }
+
+  return [...out].sort();
 }
 
 export interface BootstrapOptions {
   dryRun?: boolean;
   commitLimit?: number;
+  /** Extra decision-doc files or directories to scan, beyond auto-detected ADRs. */
+  docs?: string[];
+  /** Project-specific marker tags, added to DEFAULT_MARKERS. */
+  markers?: string[];
+  /** Auto-detect conventional ADR directories. Default true; --no-adr disables. */
+  adr?: boolean;
 }
 
 export async function runBootstrap(options: BootstrapOptions = {}): Promise<void> {
@@ -92,6 +129,10 @@ export async function runBootstrap(options: BootstrapOptions = {}): Promise<void
     else if (rec.kn === 'decision') counts.decision++;
   };
 
+  // Merge any project-specific tags into the default marker set (uppercased,
+  // deduped) so a team's own conventions are picked up.
+  const markers = [...new Set([...DEFAULT_MARKERS, ...(options.markers ?? []).map((m) => m.toUpperCase())])];
+
   // ── marker comments → gotcha ────────────────────────────────────────────────
   const extensions = getExtensionsForLanguages(config.analyze.languages);
   const includeDirs = config.analyze.include.map((d) => path.resolve(projectDir, d));
@@ -104,7 +145,7 @@ export async function runBootstrap(options: BootstrapOptions = {}): Promise<void
       continue;
     }
     const relPath = path.relative(projectDir, absPath);
-    for (const m of scanMarkers(relPath, source)) {
+    for (const m of scanMarkers(relPath, source, markers)) {
       add({
         kn: 'gotcha',
         cl: m.claim,
@@ -128,9 +169,9 @@ export async function runBootstrap(options: BootstrapOptions = {}): Promise<void
     }
   }
 
-  // ── ADR docs → decision ─────────────────────────────────────────────────────
-  const adrFiles = findAdrFiles(projectDir);
-  for (const rel of adrFiles) {
+  // ── decision docs → decision ────────────────────────────────────────────────
+  const docFiles = resolveDocs(projectDir, options.docs ?? [], options.adr !== false);
+  for (const rel of docFiles) {
     let source: string;
     try {
       source = fs.readFileSync(path.join(projectDir, rel), 'utf-8');
@@ -155,7 +196,10 @@ export async function runBootstrap(options: BootstrapOptions = {}): Promise<void
   console.log(chalk.gray('─'.repeat(40)));
   console.log(`  ${chalk.cyan('gotcha')}   (marker comments)  ${counts.gotcha}`);
   console.log(`  ${chalk.cyan('rejected')} (git reverts)      ${counts.rejected}`);
-  console.log(`  ${chalk.cyan('decision')} (ADR docs)         ${counts.decision}`);
+  console.log(
+    `  ${chalk.cyan('decision')} (decision docs)    ${counts.decision}` +
+      chalk.gray(docFiles.length > 0 ? `  from ${docFiles.length} doc(s)` : ''),
+  );
   if (counts.skipped > 0) {
     console.log(chalk.gray(`  ${counts.skipped} already present, skipped`));
   }

@@ -75,15 +75,26 @@ program
   .description('Output knowledge for a file (reads Claude Code PreToolUse hook JSON from stdin)')
   .action(() => runContext());
 
+const collect = (val: string, acc: string[]): string[] => {
+  acc.push(val);
+  return acc;
+};
+
 program
   .command('bootstrap')
-  .description('Seed knowledge records from an existing codebase (marker comments, git reverts, ADR docs)')
+  .description('Seed knowledge records from an existing codebase (marker comments, git reverts, decision docs)')
   .option('--dry-run', 'Show what would be added without writing')
   .option('--commit-limit <n>', 'How many recent commits to scan for reverts (default 2000)', (v) => parseInt(v, 10))
+  .option('--doc <path>', 'Decision-doc file or directory to scan (repeatable). Point at ADRs wherever they live.', collect, [])
+  .option('--marker <name>', 'Extra comment marker tag to treat as a gotcha (repeatable)', collect, [])
+  .option('--no-adr', 'Skip auto-detection of conventional ADR directories')
   .action((opts) =>
     runBootstrap({
       dryRun: !!opts.dryRun,
       commitLimit: typeof opts.commitLimit === 'number' && !Number.isNaN(opts.commitLimit) ? opts.commitLimit : undefined,
+      docs: opts.doc as string[],
+      markers: opts.marker as string[],
+      adr: opts.adr as boolean, // commander sets this false when --no-adr is passed
     }),
   );
 

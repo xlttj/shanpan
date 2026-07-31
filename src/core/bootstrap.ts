@@ -25,13 +25,22 @@ export interface MarkerCandidate {
 // Markers that signal a trap or a caveat worth carrying forward. TODO is
 // excluded on purpose: it is future work, not knowledge about the code. NOTE is
 // excluded because it is too often used for benign asides to be high-signal.
-const MARKERS = ['HACK', 'FIXME', 'XXX', 'WORKAROUND', 'GOTCHA', 'WARNING', 'CAREFUL', 'DANGER'];
+// A project with its own conventions can extend this set via the CLI.
+export const DEFAULT_MARKERS = ['HACK', 'FIXME', 'XXX', 'WORKAROUND', 'GOTCHA', 'WARNING', 'CAREFUL', 'DANGER'];
 
-const MARKER_RE = new RegExp(
-  // comment opener, then the marker as the first token, then the text
-  String.raw`(?:\/\/+|#+|\/\*+|\*+)\s*(` + MARKERS.join('|') + String.raw`)\b[:\-\s]+(.+?)\s*(?:\*\/\s*)?$`,
-  'i',
-);
+/** Build the marker-matching regex for a given marker set. */
+export function buildMarkerRegex(markers: readonly string[]): RegExp {
+  // Escape each marker so a custom one with regex metacharacters is literal.
+  const alt = markers.map((m) => m.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|');
+  return new RegExp(
+    // comment opener, then the marker as the first token, then a mandatory
+    // separator (which also serves as the token boundary — so a marker ending
+    // in a non-word char like "C++" still works, and "WARNING" is never matched
+    // as "WARN"), then the claim text.
+    String.raw`(?:\/\/+|#+|\/\*+|\*+)\s*(` + alt + String.raw`)[:\-\s]+(.+?)\s*(?:\*\/\s*)?$`,
+    'i',
+  );
+}
 
 function clip(text: string): string {
   const t = text.trim();
@@ -41,13 +50,20 @@ function clip(text: string): string {
 /**
  * Scan one source file for marker comments. Matches a marker only when it is
  * the first token of a comment, which keeps precision high — prose that merely
- * mentions "a hack" does not match.
+ * mentions "a hack" does not match. Pass a marker set to match project-specific
+ * tags; defaults to DEFAULT_MARKERS.
  */
-export function scanMarkers(relPath: string, source: string): MarkerCandidate[] {
+export function scanMarkers(
+  relPath: string,
+  source: string,
+  markers: readonly string[] = DEFAULT_MARKERS,
+): MarkerCandidate[] {
+  if (markers.length === 0) return [];
+  const re = buildMarkerRegex(markers);
   const out: MarkerCandidate[] = [];
   const lines = source.split('\n');
   for (let i = 0; i < lines.length; i++) {
-    const m = MARKER_RE.exec(lines[i] ?? '');
+    const m = re.exec(lines[i] ?? '');
     if (!m) continue;
     const claim = clip(m[2] ?? '');
     if (claim.length === 0) continue; // a bare "// HACK" carries no knowledge
