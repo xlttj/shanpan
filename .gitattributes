@@ -1,0 +1,5 @@
+# Knowledge records are append-only with unique ids, so a textual conflict is
+# always resolvable by keeping both sides. union does exactly that — but only
+# because records are immutable and occupy exactly one line each.
+.specgraph/knowledge.ndjson merge=union
+.specgraph/knowledge.archive.ndjson merge=union

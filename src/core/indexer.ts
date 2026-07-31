@@ -150,6 +150,7 @@ export async function getGraphStats(conn: Connection): Promise<{
   specs: number;
   rules: number;
   symbols: number;
+  refs: number;
   edges: Record<string, number>;
 }> {
   const countNode = async (label: string): Promise<number> => {

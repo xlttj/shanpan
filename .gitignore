@@ -1,5 +1,10 @@
 node_modules/
 dist/
-.specgraph
-.specgraph/
 *.js.map
+
+# The graph is derived and disposable; the knowledge records are the source of
+# truth and must be committed. Note the '/*' form — git cannot re-include a
+# file whose parent directory is itself excluded.
+.specgraph/*
+!.specgraph/knowledge.ndjson
+!.specgraph/knowledge.archive.ndjson

@@ -1,7 +1,7 @@
 import { Database, Connection, QueryResult } from '@ladybugdb/core';
 import path from 'node:path';
 import fs from 'node:fs';
-import { SCHEMA_STATEMENTS, DROP_ORDER } from './schema.js';
+import { SCHEMA_STATEMENTS, SCHEMA_TABLE_NAMES, DROP_ORDER } from './schema.js';
 
 export const DB_DIR = '.specgraph';
 export const DB_FILE = 'graph.db';
@@ -48,11 +48,17 @@ async function tableExists(conn: Connection, name: string): Promise<boolean> {
   return rows.some((row) => row['name'] === name);
 }
 
+/**
+ * Create any schema table that does not exist yet. Creating per-table rather
+ * than all-or-nothing means a database built by an earlier version picks up
+ * newly added tables without a rebuild.
+ */
 export async function ensureSchema(conn: Connection): Promise<void> {
-  const specExists = await tableExists(conn, 'Spec');
-  if (specExists) return;
-
-  for (const stmt of SCHEMA_STATEMENTS) {
+  for (let i = 0; i < SCHEMA_STATEMENTS.length; i++) {
+    const name = SCHEMA_TABLE_NAMES[i];
+    const stmt = SCHEMA_STATEMENTS[i];
+    if (name === undefined || stmt === undefined) continue;
+    if (await tableExists(conn, name)) continue;
     const result = await runQuery(conn, stmt);
     result.close();
   }

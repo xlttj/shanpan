@@ -1,0 +1,416 @@
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import fs from 'node:fs';
+import path from 'node:path';
+import os from 'node:os';
+import {
+  formatTs,
+  tsToSql,
+  nextId,
+  validateRecord,
+  serializeRecord,
+  parseRecords,
+  readRecords,
+  appendRecords,
+  liveIds,
+  knowledgePath,
+} from '../src/core/records.js';
+import { indexRecords, provenanceKind } from '../src/core/record-indexer.js';
+import { openDatabase, closeDatabase, queryAll } from '../src/core/db.js';
+import { indexSpecs } from '../src/core/indexer.js';
+import type { KnowledgeRecord } from '../src/types/record.js';
+import type { Database, Connection } from '@ladybugdb/core';
+
+let tmpDir: string;
+
+beforeEach(() => {
+  tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'specgraph-records-'));
+  fs.mkdirSync(path.join(tmpDir, '.specgraph'), { recursive: true });
+});
+
+afterEach(() => {
+  fs.rmSync(tmpDir, { recursive: true, force: true });
+});
+
+function rec(over: Partial<KnowledgeRecord> = {}): KnowledgeRecord {
+  return {
+    id: 'a1b2c3',
+    kn: 'decision',
+    cl: 'use composite key',
+    pv: 'u',
+    ts: '20260617143022',
+    ...over,
+  } as KnowledgeRecord;
+}
+
+// ─── timestamps ──────────────────────────────────────────────────────────────
+
+describe('timestamps', () => {
+  it('formats a Date as YYYYMMDDHHIISS in UTC', () => {
+    expect(formatTs(new Date('2026-06-17T14:30:22Z'))).toBe('20260617143022');
+  });
+
+  it('pads single-digit components', () => {
+    expect(formatTs(new Date('2026-01-02T03:04:05Z'))).toBe('20260102030405');
+  });
+
+  it('round-trips through tsToSql', () => {
+    expect(tsToSql('20260617143022')).toBe('2026-06-17 14:30:22');
+  });
+
+  it('rejects a non-existent calendar date', () => {
+    expect(tsToSql('20260231120000')).toBeNull();
+  });
+
+  it('rejects an out-of-range hour', () => {
+    expect(tsToSql('20260617250000')).toBeNull();
+  });
+
+  it('rejects wrong length', () => {
+    expect(tsToSql('202606171430')).toBeNull();
+  });
+
+  it('rejects non-digits', () => {
+    expect(tsToSql('2026-06-17 14:30')).toBeNull();
+  });
+});
+
+// ─── ids ─────────────────────────────────────────────────────────────────────
+
+describe('nextId', () => {
+  it('produces a 6-char lowercase hex id', () => {
+    expect(nextId(new Set())).toMatch(/^[0-9a-f]{6}$/);
+  });
+
+  it('never returns an id already taken', () => {
+    const taken = new Set<string>();
+    for (let i = 0; i < 200; i++) {
+      const id = nextId(taken);
+      expect(taken.has(id)).toBe(false);
+      taken.add(id);
+    }
+  });
+});
+
+// ─── validation ──────────────────────────────────────────────────────────────
+
+describe('validateRecord', () => {
+  it('accepts a well-formed record', () => {
+    expect(validateRecord(rec(), 1)).toEqual([]);
+  });
+
+  it('rejects an unknown kind', () => {
+    const errs = validateRecord(rec({ kn: 'nonsense' as never }), 1);
+    expect(errs.some((e) => e.message.includes("'kn'"))).toBe(true);
+  });
+
+  it('rejects an empty claim', () => {
+    const errs = validateRecord(rec({ cl: '   ' }), 1);
+    expect(errs.some((e) => e.message.includes('claim'))).toBe(true);
+  });
+
+  it('requires when and then on behavior records', () => {
+    const errs = validateRecord(rec({ kn: 'behavior' }), 1);
+    expect(errs.some((e) => e.message.includes("'wn'"))).toBe(true);
+    expect(errs.some((e) => e.message.includes("'tn'"))).toBe(true);
+  });
+
+  it('accepts a complete behavior record', () => {
+    const errs = validateRecord(
+      rec({ kn: 'behavior', cl: 'delete removes rim', wn: 'a delete event arrives', tn: 'the rim is removed' }),
+      1,
+    );
+    expect(errs).toEqual([]);
+  });
+
+  it('forbids given/when/then on non-behavior kinds', () => {
+    const errs = validateRecord(rec({ kn: 'decision', wn: 'something happens' }), 1);
+    expect(errs.some((e) => e.message.includes("only valid on kind 'behavior'"))).toBe(true);
+  });
+
+  it('accepts every bare provenance token', () => {
+    for (const pv of ['u', 'a', 'i']) {
+      expect(validateRecord(rec({ pv }), 1)).toEqual([]);
+    }
+  });
+
+  it('accepts pointer provenance forms', () => {
+    for (const pv of ['g:abc123f', 't:tests/rim.test.ts', 'n:src/a.php:42', 'd:specs/old.md']) {
+      expect(validateRecord(rec({ pv }), 1)).toEqual([]);
+    }
+  });
+
+  it('rejects an unknown provenance prefix', () => {
+    const errs = validateRecord(rec({ pv: 'z:whatever' }), 1);
+    expect(errs.some((e) => e.message.includes("'pv'"))).toBe(true);
+  });
+
+  it('rejects a prefix with no pointer', () => {
+    const errs = validateRecord(rec({ pv: 'g:' }), 1);
+    expect(errs.some((e) => e.message.includes("'pv'"))).toBe(true);
+  });
+
+  it('rejects a non-object', () => {
+    expect(validateRecord('nope', 1)[0]?.message).toBe('not a JSON object');
+    expect(validateRecord([1, 2], 1)[0]?.message).toBe('not a JSON object');
+  });
+
+  it('rejects subject entries that are not non-empty strings', () => {
+    const errs = validateRecord(rec({ sb: ['ok', ''] as string[] }), 1);
+    expect(errs.some((e) => e.message.includes("'sb'"))).toBe(true);
+  });
+});
+
+// ─── serialisation ───────────────────────────────────────────────────────────
+
+describe('serializeRecord', () => {
+  it('emits keys in canonical order regardless of input order', () => {
+    const line = serializeRecord({
+      ts: '20260617143022', cl: 'x', id: 'aa11bb', pv: 'u', kn: 'intent',
+    } as KnowledgeRecord);
+    expect(line).toBe('{"id":"aa11bb","kn":"intent","cl":"x","pv":"u","ts":"20260617143022"}');
+  });
+
+  it('omits undefined optional fields entirely', () => {
+    expect(serializeRecord(rec())).not.toContain('null');
+    expect(serializeRecord(rec())).not.toContain('"bc"');
+  });
+
+  it('produces exactly one line (merge=union depends on this)', () => {
+    const line = serializeRecord(rec({ cl: 'multi\nline\nclaim', bc: 'because\nreasons' }));
+    expect(line.includes('\n')).toBe(false);
+  });
+
+  it('round-trips through parseRecords', () => {
+    const original = rec({ sb: ['src/a.ts::Foo'], bc: 'weil' });
+    const { records, errors } = parseRecords(serializeRecord(original));
+    expect(errors).toEqual([]);
+    expect(records[0]).toEqual(original);
+  });
+});
+
+// ─── parsing ─────────────────────────────────────────────────────────────────
+
+describe('parseRecords', () => {
+  it('skips blank lines', () => {
+    const text = `\n${serializeRecord(rec())}\n\n`;
+    const { records, errors } = parseRecords(text);
+    expect(records).toHaveLength(1);
+    expect(errors).toEqual([]);
+  });
+
+  it('reports malformed JSON with a line number and keeps going', () => {
+    const text = [serializeRecord(rec({ id: 'aaa111' })), 'not json', serializeRecord(rec({ id: 'bbb222' }))].join('\n');
+    const { records, errors } = parseRecords(text);
+    expect(records.map((r) => r.id)).toEqual(['aaa111', 'bbb222']);
+    expect(errors).toHaveLength(1);
+    expect(errors[0]?.line).toBe(2);
+  });
+
+  it('rejects a duplicate id rather than silently keeping both', () => {
+    const text = [serializeRecord(rec()), serializeRecord(rec({ cl: 'different' }))].join('\n');
+    const { records, errors } = parseRecords(text);
+    expect(records).toHaveLength(1);
+    expect(errors.some((e) => e.message.includes('duplicate id'))).toBe(true);
+  });
+
+  it('reports an invalid record without dropping valid neighbours', () => {
+    const bad = JSON.stringify({ id: 'ccc333', kn: 'bogus', cl: 'x', pv: 'u', ts: '20260617143022' });
+    const text = [serializeRecord(rec({ id: 'aaa111' })), bad].join('\n');
+    const { records, errors } = parseRecords(text);
+    expect(records.map((r) => r.id)).toEqual(['aaa111']);
+    expect(errors.some((e) => e.id === 'ccc333')).toBe(true);
+  });
+});
+
+// ─── file io ─────────────────────────────────────────────────────────────────
+
+describe('append / read', () => {
+  it('returns empty for a missing knowledge file', () => {
+    expect(readRecords(tmpDir)).toEqual({ records: [], errors: [] });
+  });
+
+  it('appends and reads back in order', () => {
+    appendRecords(tmpDir, [rec({ id: 'aaa111' }), rec({ id: 'bbb222' })]);
+    appendRecords(tmpDir, [rec({ id: 'ccc333' })]);
+    const { records, errors } = readRecords(tmpDir);
+    expect(errors).toEqual([]);
+    expect(records.map((r) => r.id)).toEqual(['aaa111', 'bbb222', 'ccc333']);
+  });
+
+  it('writes one physical line per record', () => {
+    appendRecords(tmpDir, [rec({ id: 'aaa111' }), rec({ id: 'bbb222' })]);
+    const lines = fs.readFileSync(knowledgePath(tmpDir), 'utf-8').split('\n').filter((l) => l.length > 0);
+    expect(lines).toHaveLength(2);
+  });
+
+  it('appending an empty list is a no-op', () => {
+    appendRecords(tmpDir, []);
+    expect(fs.existsSync(knowledgePath(tmpDir))).toBe(false);
+  });
+});
+
+// ─── supersede chains ────────────────────────────────────────────────────────
+
+describe('liveIds', () => {
+  it('treats every record as live when nothing supersedes', () => {
+    expect(liveIds([rec({ id: 'aaa111' }), rec({ id: 'bbb222' })]).size).toBe(2);
+  });
+
+  it('drops a superseded record', () => {
+    const live = liveIds([rec({ id: 'aaa111' }), rec({ id: 'bbb222', ss: 'aaa111' })]);
+    expect(live.has('aaa111')).toBe(false);
+    expect(live.has('bbb222')).toBe(true);
+  });
+
+  it('keeps only the tail of a chain', () => {
+    const live = liveIds([
+      rec({ id: 'aaa111' }),
+      rec({ id: 'bbb222', ss: 'aaa111' }),
+      rec({ id: 'ccc333', ss: 'bbb222' }),
+    ]);
+    expect([...live]).toEqual(['ccc333']);
+  });
+});
+
+describe('provenanceKind', () => {
+  it('returns the bare token unchanged', () => {
+    expect(provenanceKind('u')).toBe('u');
+  });
+  it('strips the pointer from a prefixed form', () => {
+    expect(provenanceKind('g:abc123f')).toBe('g');
+    expect(provenanceKind('n:src/a.php:42')).toBe('n');
+  });
+});
+
+// ─── schema bookkeeping ──────────────────────────────────────────────────────
+
+describe('schema table names', () => {
+  it('stay aligned with the DDL statements', async () => {
+    const { SCHEMA_STATEMENTS, SCHEMA_TABLE_NAMES } = await import('../src/core/schema.js');
+    expect(SCHEMA_TABLE_NAMES).toHaveLength(SCHEMA_STATEMENTS.length);
+    const derived = SCHEMA_STATEMENTS.map((s) => {
+      const m = /CREATE (?:NODE|REL) TABLE (?:GROUP )?(\w+)/.exec(s);
+      return m?.[1] ?? null;
+    });
+    expect(derived).toEqual(SCHEMA_TABLE_NAMES);
+  });
+
+  it('lists every table in DROP_ORDER', async () => {
+    const { SCHEMA_TABLE_NAMES, DROP_ORDER } = await import('../src/core/schema.js');
+    expect([...SCHEMA_TABLE_NAMES].sort()).toEqual([...DROP_ORDER].sort());
+  });
+});
+
+// ─── graph indexing ──────────────────────────────────────────────────────────
+
+describe('indexRecords', () => {
+  let db: Database;
+  let conn: Connection;
+  let dbDir: string;
+
+  beforeEach(async () => {
+    dbDir = fs.mkdtempSync(path.join(os.tmpdir(), 'specgraph-recidx-'));
+    fs.mkdirSync(path.join(dbDir, '.specgraph'), { recursive: true });
+    ({ db, conn } = await openDatabase(dbDir));
+    await indexSpecs(conn, []); // drops + recreates schema
+    const r = await conn.query(
+      `CREATE (:CodeSymbol { id: 'src/a.ts::Foo', fqn: 'Foo', symbol_type: 'class', file_path: 'src/a.ts', line_start: 0, line_end: 0, language: 'typescript' })`,
+    );
+    if (!Array.isArray(r)) r.close();
+    const rf = await conn.query(
+      `CREATE (:File { id: 'composer.json', path: 'composer.json', ext: '.json', kind: 'config' })`,
+    );
+    if (!Array.isArray(rf)) rf.close();
+  });
+
+  afterEach(async () => {
+    await closeDatabase(db, conn);
+    fs.rmSync(dbDir, { recursive: true, force: true });
+  });
+
+  it('creates Record nodes with a real TIMESTAMP', async () => {
+    await indexRecords(conn, [rec({ id: 'aaa111' })]);
+    const { rows } = await queryAll(conn, 'MATCH (r:Record) RETURN r.id AS id, r.ts AS ts, r.kind AS kind');
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.['kind']).toBe('decision');
+    // Proves timestamp('...') parsed rather than landing as NULL or a string.
+    expect(rows[0]?.['ts']).toBeInstanceOf(Date);
+  });
+
+  it('supports temporal comparison in Cypher', async () => {
+    await indexRecords(conn, [
+      rec({ id: 'aaa111', ts: '20260101120000' }),
+      rec({ id: 'bbb222', ts: '20260901120000' }),
+    ]);
+    const { rows } = await queryAll(
+      conn,
+      `MATCH (r:Record) WHERE r.ts > timestamp('2026-06-01 00:00:00') RETURN r.id AS id`,
+    );
+    expect(rows.map((r) => r['id'])).toEqual(['bbb222']);
+  });
+
+  it('links ABOUT to an existing CodeSymbol', async () => {
+    const stats = await indexRecords(conn, [rec({ id: 'aaa111', sb: ['src/a.ts::Foo'] })]);
+    expect(stats.about).toBe(1);
+    expect(stats.unresolved).toEqual([]);
+    const { rows } = await queryAll(
+      conn,
+      'MATCH (r:Record)-[:ABOUT]->(c:CodeSymbol) RETURN c.id AS id',
+    );
+    expect(rows[0]?.['id']).toBe('src/a.ts::Foo');
+  });
+
+  it('links ABOUT to an existing File', async () => {
+    const stats = await indexRecords(conn, [rec({ id: 'aaa111', sb: ['composer.json'] })]);
+    expect(stats.about).toBe(1);
+    const { rows } = await queryAll(conn, 'MATCH (r:Record)-[:ABOUT]->(f:File) RETURN f.id AS id');
+    expect(rows[0]?.['id']).toBe('composer.json');
+  });
+
+  it('reports an unresolved subject instead of creating a stub node', async () => {
+    const stats = await indexRecords(conn, [rec({ id: 'aaa111', sb: ['src/gone.ts::Vanished'] })]);
+    expect(stats.about).toBe(0);
+    expect(stats.unresolved).toEqual([{ recordId: 'aaa111', subject: 'src/gone.ts::Vanished' }]);
+    const { rows } = await queryAll(conn, 'MATCH (c:CodeSymbol) RETURN c.id AS id');
+    expect(rows.map((r) => r['id'])).toEqual(['src/a.ts::Foo']);
+  });
+
+  it('marks superseded records as not live and edges the chain', async () => {
+    const stats = await indexRecords(conn, [
+      rec({ id: 'aaa111' }),
+      rec({ id: 'bbb222', ss: 'aaa111' }),
+    ]);
+    expect(stats.supersedes).toBe(1);
+    expect(stats.live).toBe(1);
+    const { rows } = await queryAll(
+      conn,
+      'MATCH (r:Record) WHERE r.live RETURN r.id AS id',
+    );
+    expect(rows.map((r) => r['id'])).toEqual(['bbb222']);
+  });
+
+  it('skips a dangling supersedes without failing', async () => {
+    const stats = await indexRecords(conn, [rec({ id: 'bbb222', ss: 'compacted-away' })]);
+    expect(stats.supersedes).toBe(0);
+    expect(stats.records).toBe(1);
+  });
+
+  it('stores provenance_kind for filtering', async () => {
+    await indexRecords(conn, [
+      rec({ id: 'aaa111', pv: 'u' }),
+      rec({ id: 'bbb222', pv: 'g:abc123f' }),
+      rec({ id: 'ccc333', pv: 'i' }),
+    ]);
+    const { rows } = await queryAll(
+      conn,
+      `MATCH (r:Record) WHERE r.provenance_kind = 'i' RETURN r.id AS id`,
+    );
+    expect(rows.map((r) => r['id'])).toEqual(['ccc333']);
+  });
+
+  it('escapes quotes in claims', async () => {
+    await indexRecords(conn, [rec({ id: 'aaa111', cl: "it's a 'quoted' claim" })]);
+    const { rows } = await queryAll(conn, 'MATCH (r:Record) RETURN r.claim AS claim');
+    expect(rows[0]?.['claim']).toBe("it's a 'quoted' claim");
+  });
+});

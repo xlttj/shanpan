@@ -41,6 +41,72 @@ describe('context hook output contract', () => {
   });
 });
 
+describe('record injection', () => {
+  function r(id: string, kind: string, over: Partial<{ claim: string; because: string | null; provenance: string }> = {}) {
+    return {
+      id,
+      kind,
+      claim: over.claim ?? `claim ${id}`,
+      because: over.because === undefined ? null : over.because,
+      provenance: over.provenance ?? 'a',
+    };
+  }
+
+  it('puts traps and invariants before background', async () => {
+    const { sortRecords } = await import('../src/cli/commands/context.js');
+    const sorted = sortRecords([
+      r('aa', 'intent'), r('bb', 'decision'), r('cc', 'gotcha'),
+      r('dd', 'constraint'), r('ee', 'rejected'),
+    ]);
+    expect(sorted.map((x) => x.kind)).toEqual([
+      'gotcha', 'constraint', 'rejected', 'decision', 'intent',
+    ]);
+  });
+
+  it('breaks ties by id so output is stable across runs', async () => {
+    const { sortRecords } = await import('../src/cli/commands/context.js');
+    const sorted = sortRecords([r('zz', 'gotcha'), r('aa', 'gotcha'), r('mm', 'gotcha')]);
+    expect(sorted.map((x) => x.id)).toEqual(['aa', 'mm', 'zz']);
+  });
+
+  it('sorts unknown kinds last rather than dropping them', async () => {
+    const { sortRecords } = await import('../src/cli/commands/context.js');
+    const sorted = sortRecords([r('aa', 'future_kind'), r('bb', 'intent')]);
+    expect(sorted.map((x) => x.kind)).toEqual(['intent', 'future_kind']);
+  });
+
+  it('renders claim, reason, id and provenance on one line each', async () => {
+    const { formatRecords } = await import('../src/cli/commands/context.js');
+    const lines = formatRecords([r('ab12cd', 'gotcha', { claim: 'do not X', because: 'it breaks Y', provenance: 'g:abc123' })]);
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toBe('  • [gotcha] do not X — it breaks Y  (ab12cd, g:abc123)');
+  });
+
+  it('omits the reason clause when a record has no because', async () => {
+    const { formatRecords } = await import('../src/cli/commands/context.js');
+    const lines = formatRecords([r('ab12cd', 'constraint', { claim: 'always UTC' })]);
+    expect(lines[0]).toBe('  • [constraint] always UTC  (ab12cd, a)');
+  });
+
+  it('caps injected records and says how many were withheld', async () => {
+    const { formatRecords, MAX_INJECTED } = await import('../src/cli/commands/context.js');
+    const many = Array.from({ length: MAX_INJECTED + 5 }, (_, i) =>
+      r(String(i).padStart(2, '0'), 'gotcha'),
+    );
+    const lines = formatRecords(many);
+    expect(lines).toHaveLength(MAX_INJECTED + 1);
+    expect(lines[lines.length - 1]).toContain('5 more record(s) not shown');
+  });
+
+  it('adds no overflow line when exactly at the cap', async () => {
+    const { formatRecords, MAX_INJECTED } = await import('../src/cli/commands/context.js');
+    const exact = Array.from({ length: MAX_INJECTED }, (_, i) =>
+      r(String(i).padStart(2, '0'), 'gotcha'),
+    );
+    expect(formatRecords(exact)).toHaveLength(MAX_INJECTED);
+  });
+});
+
 describe('file path extraction logic', () => {
   function extractFilePaths(toolInput: { file_path?: string; edits?: Array<{ file_path?: string }> }): string[] {
     const paths: string[] = [];

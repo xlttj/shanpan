@@ -58,16 +58,51 @@ export const SCHEMA_STATEMENTS = [
     FROM CodeSymbol TO CodeSymbol,
     call_kind STRING
   )`,
+  // Knowledge records. The wire format uses short keys to save context bytes;
+  // the graph uses full names because queries are written by humans and agents,
+  // not stored per-row. The indexer translates between the two.
+  `CREATE NODE TABLE Record (
+    id STRING PRIMARY KEY,
+    kind STRING,
+    claim STRING,
+    because STRING,
+    given STRING,
+    when_ STRING,
+    then_ STRING,
+    provenance STRING,
+    provenance_kind STRING,
+    ts TIMESTAMP,
+    live BOOLEAN
+  )`,
+  `CREATE REL TABLE GROUP ABOUT (
+    FROM Record TO CodeSymbol,
+    FROM Record TO File
+  )`,
+  `CREATE REL TABLE SUPERSEDES (FROM Record TO Record)`,
+];
+
+/**
+ * Table name for each statement above, in the same order. Lets `ensureSchema`
+ * create only what is missing, so a database built by an older version gains
+ * new tables instead of needing a full rebuild.
+ */
+export const SCHEMA_TABLE_NAMES = [
+  'Spec', 'BusinessRule', 'CodeSymbol', 'File', 'Ref',
+  'REFERENCES', 'DEFINES', 'CONSTRAINS', 'IMPLEMENTS', 'CONTAINS', 'CALLS',
+  'Record', 'ABOUT', 'SUPERSEDES',
 ];
 
 /** Tables to drop in dependency order (edges before nodes). */
 export const DROP_ORDER = [
+  'SUPERSEDES',
+  'ABOUT',
   'CALLS',
   'IMPLEMENTS',
   'CONTAINS',
   'CONSTRAINS',
   'DEFINES',
   'REFERENCES',
+  'Record',
   'CodeSymbol',
   'BusinessRule',
   'Ref',

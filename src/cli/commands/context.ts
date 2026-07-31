@@ -42,6 +42,92 @@ function extractFilePaths(input: HookInput): string[] {
   return [...new Set(paths)];
 }
 
+export interface ContextRecord {
+  id: string;
+  kind: string;
+  claim: string;
+  because: string | null;
+  provenance: string;
+}
+
+/**
+ * Order records so the ones that change what an agent is about to do come
+ * first: traps and invariants, then things already tried, then background.
+ */
+const KIND_PRIORITY: Record<string, number> = {
+  gotcha: 0,
+  constraint: 1,
+  rejected: 2,
+  decision: 3,
+  behavior: 4,
+  intent: 5,
+  conflict: 6,
+};
+
+/** Cap injected records so a well-documented file cannot flood the context. */
+export const MAX_INJECTED = 12;
+
+/** Traps and invariants first, background last; ties broken by id for stability. */
+export function sortRecords(records: ContextRecord[]): ContextRecord[] {
+  return [...records].sort(
+    (a, b) =>
+      (KIND_PRIORITY[a.kind] ?? 99) - (KIND_PRIORITY[b.kind] ?? 99) ||
+      a.id.localeCompare(b.id),
+  );
+}
+
+async function fetchRecords(
+  conn: Awaited<ReturnType<typeof openDatabase>>['conn'],
+  relPaths: string[],
+): Promise<ContextRecord[]> {
+  const byId = new Map<string, ContextRecord>();
+
+  for (const relPath of relPaths) {
+    const esc = escId(relPath);
+    // DISTINCT matters: a record with several subjects in the same file would
+    // otherwise come back once per matching edge.
+    const queries = [
+      `MATCH (r:Record)-[:ABOUT]->(c:CodeSymbol {file_path: '${esc}'})
+       WHERE r.live
+       RETURN DISTINCT r.id AS id, r.kind AS kind, r.claim AS claim,
+                       r.because AS because, r.provenance AS provenance`,
+      `MATCH (r:Record)-[:ABOUT]->(f:File {id: '${esc}'})
+       WHERE r.live
+       RETURN DISTINCT r.id AS id, r.kind AS kind, r.claim AS claim,
+                       r.because AS because, r.provenance AS provenance`,
+    ];
+    for (const cypher of queries) {
+      const { rows } = await queryAll(conn, cypher);
+      for (const row of rows) {
+        const id = String(row['id']);
+        if (byId.has(id)) continue;
+        byId.set(id, {
+          id,
+          kind: String(row['kind']),
+          claim: String(row['claim']),
+          because: row['because'] == null ? null : String(row['because']),
+          provenance: String(row['provenance']),
+        });
+      }
+    }
+  }
+
+  return sortRecords([...byId.values()]);
+}
+
+export function formatRecords(records: ContextRecord[]): string[] {
+  const shown = records.slice(0, MAX_INJECTED);
+  const lines = shown.map((r) => {
+    const why = r.because ? ` — ${r.because}` : '';
+    return `  • [${r.kind}] ${r.claim}${why}  (${r.id}, ${r.provenance})`;
+  });
+  if (records.length > shown.length) {
+    const rest = records.length - shown.length;
+    lines.push(`  … ${rest} more record(s) not shown — query them if relevant.`);
+  }
+  return lines;
+}
+
 export async function runContext(): Promise<void> {
   const raw = await readStdin();
   if (!raw.trim()) {
@@ -100,24 +186,41 @@ export async function runContext(): Promise<void> {
     }
 
     const unique = [...new Map(allSpecs.map((s) => [s.specId, s])).values()];
+    const records = await fetchRecords(conn, relPaths);
 
-    if (unique.length === 0) {
+    if (unique.length === 0 && records.length === 0) {
       process.stdout.write(allowResponse());
       return;
     }
 
     const fileList = relPaths.length === 1 ? relPaths[0] : `${relPaths.length} files`;
-    const specLines = unique
-      .map((s) => `  • ${s.specId} [${s.type}]`)
-      .join('\n');
+    const sections: string[] = [];
 
-    const additionalContext = [
-      `[specgraph] Specs covering ${fileList} — review before editing:`,
-      specLines,
+    // Records carry their claims inline, so the agent needs no follow-up read.
+    if (records.length > 0) {
+      sections.push(
+        `[specgraph] Known about ${fileList} — read before editing:`,
+        ...formatRecords(records),
+      );
+    }
+
+    if (unique.length > 0) {
+      if (sections.length > 0) sections.push('');
+      sections.push(
+        `[specgraph] Specs covering ${fileList}:`,
+        ...unique.map((s) => `  • ${s.specId} [${s.type}]`),
+        '',
+        'Read the full spec if needed: get_spec("<specId>")',
+      );
+    }
+
+    sections.push(
       '',
-      'Read the full spec if needed: get_spec("<specId>")',
-      'If your edit would violate an acceptance criterion or break a business rule, surface the conflict before proceeding.',
-    ].join('\n');
+      'If your edit would contradict any of the above, surface the conflict before proceeding.',
+      'If you learn something durable while editing, record it: specgraph records add --kind <kind> --claim "..." --because "..." --subject <symbolId>',
+    );
+
+    const additionalContext = sections.join('\n');
 
     process.stdout.write(
       JSON.stringify({

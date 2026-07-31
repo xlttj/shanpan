@@ -10,6 +10,8 @@ import { runUpdate } from './commands/update.js';
 import { runCheck } from './commands/check.js';
 import { runUpgrade } from './commands/upgrade.js';
 import { runContext } from './commands/context.js';
+import { runRecordsIndex, runRecordsCheck, runRecordsAdd } from './commands/records.js';
+import { RECORD_KINDS } from '../types/record.js';
 
 const program = new Command();
 
@@ -119,6 +121,46 @@ program
   .command('context')
   .description('Output spec context for a file (reads Claude Code PreToolUse hook JSON from stdin)')
   .action(() => runContext());
+
+const records = program
+  .command('records')
+  .description('Work with the agent-native knowledge record file (.specgraph/knowledge.ndjson)');
+
+records
+  .command('index')
+  .description('Parse knowledge.ndjson and rebuild Record nodes in the graph')
+  .action(() => runRecordsIndex());
+
+records
+  .command('check')
+  .description('Validate knowledge.ndjson without touching the graph')
+  .action(() => runRecordsCheck());
+
+records
+  .command('add')
+  .description('Append a knowledge record')
+  .requiredOption('--kind <kind>', RECORD_KINDS.join(' | '))
+  .requiredOption('--claim <text>', 'The claim itself; for behavior, the scenario name')
+  .option('--because <text>', 'Why the claim holds')
+  .option('--subject <ids...>', 'Symbol IDs or file paths this record is about')
+  .option('--provenance <token>', 'u | a | i | g:<sha> | t:<path> | n:<path>:<line> | d:<path>', 'a')
+  .option('--given <text>', 'behavior only: precondition')
+  .option('--when <text>', 'behavior only: triggering event')
+  .option('--then <text>', 'behavior only: expected outcome')
+  .option('--supersedes <id>', 'Record id this one replaces')
+  .action((opts) =>
+    runRecordsAdd({
+      kind: opts.kind as string,
+      claim: opts.claim as string,
+      because: opts.because as string | undefined,
+      subjects: opts.subject as string[] | undefined,
+      provenance: opts.provenance as string | undefined,
+      given: opts.given as string | undefined,
+      when: opts.when as string | undefined,
+      then: opts.then as string | undefined,
+      supersedes: opts.supersedes as string | undefined,
+    }),
+  );
 
 // process.exit() prevents V8 from running GC finalizers in an unspecified
 // order after the command completes. Without this, the simultaneous presence
