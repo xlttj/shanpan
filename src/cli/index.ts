@@ -7,6 +7,7 @@ import { runAnalyze } from './commands/analyze.js';
 import { runCheck } from './commands/check.js';
 import { runUpgrade } from './commands/upgrade.js';
 import { runContext } from './commands/context.js';
+import { runRules } from './commands/rules.js';
 import { runBootstrap } from './commands/bootstrap.js';
 import { runRecordsIndex, runRecordsCheck, runRecordsAdd } from './commands/records.js';
 import { RECORD_KINDS } from '../types/record.js';
@@ -68,12 +69,24 @@ program
   .description('Check that knowledge records still match the code')
   .option('--staged', 'Check staged git changes for deletions/renames')
   .option('--hook-output', 'Output JSON for use in IDE Stop hooks')
-  .action((opts) => runCheck({ staged: !!opts.staged, hookOutput: !!opts.hookOutput }));
+  .option('--format <ide>', 'Hook output dialect: claude | cursor', 'claude')
+  .action((opts) =>
+    runCheck({
+      staged: !!opts.staged,
+      hookOutput: !!opts.hookOutput,
+      format: opts.format === 'cursor' ? 'cursor' : 'claude',
+    }),
+  );
 
 program
   .command('context')
   .description('Output knowledge for a file (reads Claude Code PreToolUse hook JSON from stdin)')
   .action(() => runContext());
+
+program
+  .command('rules')
+  .description('Generate .cursor/rules/*.mdc from knowledge records, scoped by glob')
+  .action(() => runRules());
 
 const collect = (val: string, acc: string[]): string[] => {
   acc.push(val);

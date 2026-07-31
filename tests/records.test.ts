@@ -335,6 +335,15 @@ describe('record MCP handlers', () => {
     expect(ids).toContain('ccc333'); // inherited from the file
   });
 
+  it('returns all records for symbols in a file when given a bare file path', async () => {
+    const { handleGetRecordsForSymbol } = await import('../src/cli/commands/mcp.js');
+    const out = parsed(await handleGetRecordsForSymbol(dbDir, 'src/a.ts'));
+    const ids = out.map((r: { id: string }) => r.id).sort();
+    expect(ids).toContain('aaa111');
+    expect(ids).toContain('bbb222');
+    expect(ids).toContain('ccc333');
+  });
+
   it('excludes superseded records by default', async () => {
     const { handleGetRecordsForSymbol } = await import('../src/cli/commands/mcp.js');
     const out = parsed(await handleGetRecordsForSymbol(dbDir, 'src/a.ts::Svc'));

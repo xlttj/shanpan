@@ -1,0 +1,23 @@
+{
+  "experimental": {
+    "hook": {
+      "file_edited": [
+        {
+          "command": [
+            "specgraph",
+            "analyze"
+          ]
+        }
+      ],
+      "session_completed": [
+        {
+          "command": [
+            "specgraph",
+            "check",
+            "--hook-output"
+          ]
+        }
+      ]
+    }
+  }
+}

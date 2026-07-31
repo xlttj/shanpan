@@ -53,7 +53,19 @@ function escList(paths: string[]): string {
   return paths.map((p) => `'${escId(p)}'`).join(', ');
 }
 
-async function runHookOutputCheck(projectDir: string): Promise<void> {
+export type HookFormat = 'claude' | 'cursor';
+
+/**
+ * Claude Code blocks a Stop with decision/reason. Cursor's native `stop` hook
+ * has no block field at all — the only way to feed text back to the model is
+ * followup_message, which it auto-submits as the next user message.
+ */
+export function blockResponse(format: HookFormat, reason: string): string {
+  if (format === 'cursor') return JSON.stringify({ followup_message: reason });
+  return JSON.stringify({ decision: 'block', reason });
+}
+
+async function runHookOutputCheck(projectDir: string, format: HookFormat): Promise<void> {
   if (!dbExists(projectDir)) {
     process.stdout.write('{}');
     return;
@@ -104,14 +116,18 @@ async function runHookOutputCheck(projectDir: string): Promise<void> {
     );
   }
 
-  process.stdout.write(JSON.stringify({ decision: 'block', reason: parts.join('\n\n') }));
+  process.stdout.write(blockResponse(format, parts.join('\n\n')));
 }
 
-export async function runCheck(options: { staged: boolean; hookOutput?: boolean }): Promise<void> {
+export async function runCheck(options: {
+  staged: boolean;
+  hookOutput?: boolean;
+  format?: HookFormat;
+}): Promise<void> {
   const projectDir = process.cwd();
 
   if (options.hookOutput) {
-    await runHookOutputCheck(projectDir);
+    await runHookOutputCheck(projectDir, options.format ?? 'claude');
     return;
   }
 

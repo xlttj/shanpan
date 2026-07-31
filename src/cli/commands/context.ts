@@ -1,5 +1,14 @@
 import path from 'node:path';
 import { openDatabase, closeDatabase, dbExists, queryAll, escId } from '../../core/db.js';
+import {
+  formatRecords,
+  sortRecords,
+  MAX_INJECTED,
+  type ContextRecord,
+} from '../../core/record-format.js';
+
+// Re-exported so the hook's formatting contract stays addressable from here.
+export { formatRecords, sortRecords, MAX_INJECTED, type ContextRecord };
 
 interface HookInput {
   hook_event_name?: string;
@@ -41,40 +50,6 @@ function extractFilePaths(input: HookInput): string[] {
   return [...new Set(paths)];
 }
 
-export interface ContextRecord {
-  id: string;
-  kind: string;
-  claim: string;
-  because: string | null;
-  provenance: string;
-}
-
-/**
- * Order records so the ones that change what an agent is about to do come
- * first: traps and invariants, then things already tried, then background.
- */
-const KIND_PRIORITY: Record<string, number> = {
-  gotcha: 0,
-  constraint: 1,
-  rejected: 2,
-  decision: 3,
-  behavior: 4,
-  intent: 5,
-  conflict: 6,
-};
-
-/** Cap injected records so a well-documented file cannot flood the context. */
-export const MAX_INJECTED = 12;
-
-/** Traps and invariants first, background last; ties broken by id for stability. */
-export function sortRecords(records: ContextRecord[]): ContextRecord[] {
-  return [...records].sort(
-    (a, b) =>
-      (KIND_PRIORITY[a.kind] ?? 99) - (KIND_PRIORITY[b.kind] ?? 99) ||
-      a.id.localeCompare(b.id),
-  );
-}
-
 async function fetchRecords(
   conn: Awaited<ReturnType<typeof openDatabase>>['conn'],
   relPaths: string[],
@@ -112,19 +87,6 @@ async function fetchRecords(
   }
 
   return sortRecords([...byId.values()]);
-}
-
-export function formatRecords(records: ContextRecord[]): string[] {
-  const shown = records.slice(0, MAX_INJECTED);
-  const lines = shown.map((r) => {
-    const why = r.because ? ` — ${r.because}` : '';
-    return `  • [${r.kind}] ${r.claim}${why}  (${r.id}, ${r.provenance})`;
-  });
-  if (records.length > shown.length) {
-    const rest = records.length - shown.length;
-    lines.push(`  … ${rest} more record(s) not shown — query them if relevant.`);
-  }
-  return lines;
 }
 
 export async function runContext(): Promise<void> {
@@ -180,7 +142,7 @@ export async function runContext(): Promise<void> {
     sections.push(
       '',
       'If your edit would contradict any of the above, surface the conflict before proceeding.',
-      'If you learn something durable while editing, record it: specgraph records add --kind <kind> --claim "..." --because "..." --subject <symbolId>',
+      'Before you finish: if you chose between alternatives, hit a trap, or learned something durable, record it (`specgraph records add` or MCP `add_record` then `reindex`). Decisions left only in code or chat are lost between sessions.',
     );
 
     const additionalContext = sections.join('\n');

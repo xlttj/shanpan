@@ -257,8 +257,10 @@ const RECORD_RETURN =
 
 /**
  * Records attached to a symbol, to its containing file, and — when the symbol
- * is a method — to its parent class. Mirrors what the PreToolUse hook injects,
- * so an agent can ask for the same knowledge mid-task.
+ * is a method — to its parent class. A bare file path returns every live
+ * record on any symbol in that file (same grouping as specgraph rules).
+ * Mirrors what the PreToolUse hook injects, so an agent can ask for the same
+ * knowledge mid-task.
  */
 export async function handleGetRecordsForSymbol(
   projectDir: string,
@@ -290,6 +292,19 @@ export async function handleGetRecordsForSymbol(
       );
       for (const row of rows) byId.set(String(row['id']), row);
     }
+
+    // Bare file path: records often name a symbol, not the File node — pull
+    // everything in the file the same way fetchRecordsByFile does for rules.
+    if (sep === -1) {
+      const { rows } = await queryAll(
+        conn,
+        `MATCH (r:Record)-[:ABOUT]->(c:CodeSymbol)
+         WHERE c.file_path = '${escId(filePath)}' ${liveFilter}
+         RETURN DISTINCT ${RECORD_RETURN}, c.id AS subject`,
+      );
+      for (const row of rows) byId.set(String(row['id']), row);
+    }
+
     return jsonResult([...byId.values()]);
   } finally {
     await closeDatabase(db, conn);

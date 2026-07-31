@@ -2,7 +2,12 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
-import { mergeSettings, installIdeHooks, claudeCodeIntegration } from '../src/core/ide-hooks.js';
+import {
+  mergeSettings,
+  installIdeHooks,
+  claudeCodeIntegration,
+  cursorIntegration,
+} from '../src/core/ide-hooks.js';
 
 let tmpDir: string;
 
@@ -51,6 +56,61 @@ describe('installIdeHooks', () => {
       PreToolUse: expect.any(Array),
     });
     expect((readSettings('.claude/settings.json') as any).hooks.PreToolUse).toHaveLength(1);
+  });
+});
+
+describe('cursor integration', () => {
+  it('writes hooks.json — Cursor never reads .cursor/settings.json', () => {
+    installIdeHooks(tmpDir, cursorIntegration);
+    expect(fs.existsSync(path.join(tmpDir, '.cursor/hooks.json'))).toBe(true);
+    expect(fs.existsSync(path.join(tmpDir, '.cursor/settings.json'))).toBe(false);
+  });
+
+  it('uses Cursor native schema: version 1 and camelCase events', () => {
+    installIdeHooks(tmpDir, cursorIntegration);
+    const s = readSettings('.cursor/hooks.json') as any;
+    expect(s.version).toBe(1);
+    expect(Object.keys(s.hooks).sort()).toEqual(['postToolUse', 'sessionStart', 'stop']);
+  });
+
+  it('carries no Claude Code schema artefacts', () => {
+    installIdeHooks(tmpDir, cursorIntegration);
+    const raw = fs.readFileSync(path.join(tmpDir, '.cursor/hooks.json'), 'utf-8');
+    expect(raw).not.toContain('PreToolUse');
+    expect(raw).not.toContain('"async"');
+    // Native entries hold the command directly, not a nested hooks array.
+    const s = JSON.parse(raw) as any;
+    expect(s.hooks.stop[0].hooks).toBeUndefined();
+    expect(typeof s.hooks.stop[0].command).toBe('string');
+  });
+
+  it('asks check for the cursor output dialect, since stop has no block field', () => {
+    installIdeHooks(tmpDir, cursorIntegration);
+    const s = readSettings('.cursor/hooks.json') as any;
+    expect(s.hooks.stop[0].command).toContain('--format cursor');
+  });
+
+  it('regenerates rules on session start and after edits', () => {
+    installIdeHooks(tmpDir, cursorIntegration);
+    const s = readSettings('.cursor/hooks.json') as any;
+    expect(s.hooks.sessionStart[0].command).toContain('specgraph rules');
+    expect(s.hooks.postToolUse[0].command).toContain('specgraph rules');
+    expect(s.hooks.postToolUse[0].matcher).toBe('Write');
+  });
+
+  it('is idempotent — running twice does not duplicate hooks', () => {
+    installIdeHooks(tmpDir, cursorIntegration);
+    installIdeHooks(tmpDir, cursorIntegration);
+    const s = readSettings('.cursor/hooks.json') as any;
+    expect(s.hooks.sessionStart).toHaveLength(1);
+    expect(s.hooks.postToolUse).toHaveLength(1);
+    expect(s.hooks.stop).toHaveLength(1);
+  });
+
+  it('does not install a preToolUse context hook, which Cursor would discard', () => {
+    installIdeHooks(tmpDir, cursorIntegration);
+    const s = readSettings('.cursor/hooks.json') as any;
+    expect(s.hooks.preToolUse).toBeUndefined();
   });
 });
 

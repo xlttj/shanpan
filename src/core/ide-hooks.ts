@@ -9,7 +9,7 @@ export interface IdeIntegration {
   buildHooksConfig(): object;
 }
 
-const HOOKS_CONFIG = {
+const CLAUDE_HOOKS_CONFIG = {
   hooks: {
     PreToolUse: [
       {
@@ -53,14 +53,39 @@ export const claudeCodeIntegration: IdeIntegration = {
   id: 'claude',
   label: 'Claude Code',
   settingsPath: '.claude/settings.json',
-  buildHooksConfig: () => HOOKS_CONFIG,
+  buildHooksConfig: () => CLAUDE_HOOKS_CONFIG,
+};
+
+/**
+ * Cursor's own hook schema: version 1, camelCase events, a flat array per event.
+ * It shares no field names with Claude Code's, so reusing that config here left
+ * Cursor with a file it never reads. Cursor also reads `.cursor/hooks.json`
+ * only — never `.cursor/settings.json`.
+ *
+ * The notable absence is a pre-edit context hook. Cursor's `preToolUse` accepts
+ * only permission/messages/updated_input, so knowledge reaches the agent through
+ * auto-attached rules (`specgraph rules`) instead, regenerated whenever the
+ * graph changes.
+ */
+const CURSOR_HOOKS_CONFIG = {
+  version: 1,
+  hooks: {
+    sessionStart: [{ command: 'specgraph rules > /dev/null 2>&1' }],
+    postToolUse: [
+      {
+        matcher: 'Write',
+        command: 'specgraph analyze > /dev/null 2>&1 && specgraph rules > /dev/null 2>&1',
+      },
+    ],
+    stop: [{ command: 'specgraph check --hook-output --format cursor' }],
+  },
 };
 
 export const cursorIntegration: IdeIntegration = {
   id: 'cursor',
   label: 'Cursor',
-  settingsPath: '.cursor/settings.json',
-  buildHooksConfig: () => HOOKS_CONFIG,
+  settingsPath: '.cursor/hooks.json',
+  buildHooksConfig: () => CURSOR_HOOKS_CONFIG,
 };
 
 const OPENCODE_HOOKS_CONFIG = {

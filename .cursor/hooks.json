@@ -1,0 +1,21 @@
+{
+  "version": 1,
+  "hooks": {
+    "sessionStart": [
+      {
+        "command": "specgraph rules > /dev/null 2>&1"
+      }
+    ],
+    "postToolUse": [
+      {
+        "matcher": "Write",
+        "command": "specgraph analyze > /dev/null 2>&1 && specgraph rules > /dev/null 2>&1"
+      }
+    ],
+    "stop": [
+      {
+        "command": "specgraph check --hook-output --format cursor"
+      }
+    ]
+  }
+}

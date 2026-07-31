@@ -99,3 +99,32 @@ describe('check command module', () => {
     expect(typeof mod.runCheck).toBe('function');
   });
 });
+
+describe('blockResponse (Stop hook dialects)', () => {
+  it('blocks with decision/reason for Claude Code', async () => {
+    const { blockResponse } = await import('../src/cli/commands/check.js');
+    expect(JSON.parse(blockResponse('claude', 'drift found'))).toEqual({
+      decision: 'block',
+      reason: 'drift found',
+    });
+  });
+
+  it('uses followup_message for Cursor, which has no block field on stop', async () => {
+    const { blockResponse } = await import('../src/cli/commands/check.js');
+    expect(JSON.parse(blockResponse('cursor', 'drift found'))).toEqual({
+      followup_message: 'drift found',
+    });
+  });
+
+  it('never emits Claude fields in the cursor dialect', async () => {
+    const { blockResponse } = await import('../src/cli/commands/check.js');
+    const out = JSON.parse(blockResponse('cursor', 'x'));
+    expect('decision' in out).toBe(false);
+    expect('reason' in out).toBe(false);
+  });
+
+  it('preserves multi-line reasons through JSON', async () => {
+    const { blockResponse } = await import('../src/cli/commands/check.js');
+    expect(JSON.parse(blockResponse('cursor', 'a\n\nb')).followup_message).toBe('a\n\nb');
+  });
+});

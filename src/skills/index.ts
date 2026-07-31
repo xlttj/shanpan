@@ -40,9 +40,17 @@ nobody wrote in the diff.
 3. **Search by topic** when you do not have a symbol yet: "search_records" does
    substring matching over claims and reasons.
 
-The PreToolUse hook injects the same knowledge automatically when you edit a
-file, so you often get it without asking. Use the tools when you need more than
-the hook shows, or before you have picked a file.
+How knowledge reaches you depends on the IDE:
+
+- **Claude Code**: the PreToolUse hook runs "specgraph context" and injects
+  records for the file being edited. You often get them without calling MCP.
+- **Cursor**: there is no pre-edit injection. "specgraph rules" writes
+  ".cursor/rules/*.mdc" files scoped by globs; Cursor auto-attaches a rule when
+  a matching file is in context. Hooks regenerate rules on sessionStart and
+  after Write. **Call "get_records_for_symbol" yourself before editing** when
+  the file is not yet in context or you need more than the attached rule shows.
+
+Use the MCP tools whenever the automatic path might have missed something.
 
 ## Reading a record
 
@@ -179,6 +187,12 @@ Before you finish a task, ask:
 3. Did I try something that did not work? → **rejected** with the reason
 4. Did the user state a rule? → any kind, provenance "u"
 5. Did a record I read turn out to be wrong? → supersede it
+
+**This is not optional for decision-heavy work.** New modules, IDE integrations,
+refactors between approaches, and anything you would explain in a commit body
+need a record while the reason is still in context. Code and comments show
+what is; they do not carry why. If you shipped a decision and did not record
+it, do so before ending the session.
 
 Record subjects must be real symbol IDs or file paths. A subject that resolves
 to nothing shows up as drift — check the ID with "search_symbols" if unsure.
