@@ -504,6 +504,75 @@ describe('record MCP handlers', () => {
   });
 });
 
+// ─── stale-graph diagnostics (agent-feedback fixes) ──────────────────────────
+
+describe('stale-graph diagnostics', () => {
+  let dbDir: string;
+
+  beforeEach(() => {
+    dbDir = fs.mkdtempSync(path.join(os.tmpdir(), 'specgraph-stale-'));
+    fs.mkdirSync(path.join(dbDir, '.specgraph'), { recursive: true });
+  });
+
+  afterEach(() => {
+    fs.rmSync(dbDir, { recursive: true, force: true });
+  });
+
+  function parsed(res: { content: { type: string; text: string }[] }): any {
+    return JSON.parse(res.content[0]!.text);
+  }
+
+  it('record reads return a rebuild hint, not [], when the graph has records on disk but none indexed', async () => {
+    // knowledge.ndjson has a record, but the graph is empty (never indexed).
+    appendRecords(dbDir, [rec({ id: 'aaa111', kn: 'gotcha', cl: 'x', sb: ['src/a.ts'] })]);
+    const { db, conn } = await openDatabase(dbDir);
+    await dropAndRecreateSchema(conn);
+    await closeDatabase(db, conn);
+
+    const { handleGetRecordsByKind } = await import('../src/cli/commands/mcp.js');
+    const res = await handleGetRecordsByKind(dbDir, 'gotcha');
+    expect(res.content[0]!.text).toContain('none are indexed');
+    expect(res.content[0]!.text).toContain('records index');
+  });
+
+  it('returns a real empty array when there genuinely are no records', async () => {
+    const { db, conn } = await openDatabase(dbDir);
+    await dropAndRecreateSchema(conn);
+    await closeDatabase(db, conn);
+
+    const { handleGetRecordsByKind } = await import('../src/cli/commands/mcp.js');
+    const res = await handleGetRecordsByKind(dbDir, 'gotcha');
+    expect(parsed(res)).toEqual([]);
+  });
+
+  it('get_record_drift flags a stale graph', async () => {
+    appendRecords(dbDir, [rec({ id: 'aaa111', kn: 'gotcha', cl: 'x', sb: ['src/a.ts'] })]);
+    const { db, conn } = await openDatabase(dbDir);
+    await dropAndRecreateSchema(conn);
+    await closeDatabase(db, conn);
+
+    const { handleGetRecordDrift } = await import('../src/cli/commands/mcp.js');
+    const out = parsed(await handleGetRecordDrift(dbDir));
+    expect(out.graphStale).toContain('records index');
+  });
+});
+
+describe('diagnoseError', () => {
+  it('translates a binder error into a recovery command', async () => {
+    const { diagnoseError } = await import('../src/cli/commands/mcp.js');
+    const res = diagnoseError(new Error('Binder exception: Cannot find property ref for r'));
+    expect(res.content[0]!.text).toContain('out of date');
+    expect(res.content[0]!.text).toContain('analyze --full');
+  });
+
+  it('passes a non-schema error through without a false migration hint', async () => {
+    const { diagnoseError } = await import('../src/cli/commands/mcp.js');
+    const res = diagnoseError(new Error('something unrelated exploded'));
+    expect(res.content[0]!.text).toContain('specgraph error');
+    expect(res.content[0]!.text).not.toContain('analyze --full');
+  });
+});
+
 // ─── schema bookkeeping ──────────────────────────────────────────────────────
 
 describe('schema table names', () => {

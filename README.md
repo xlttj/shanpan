@@ -42,13 +42,18 @@ Add the following to your MCP client's server configuration. `--project-dir` mus
 
 ## Available MCP tools
 
-**Specs and rules**
-`list_specs` `get_spec` `list_rules` `get_specs_by_ref` `get_drift_report` `get_unspecced_symbols` `create_spec` `update_spec` `reindex`
+<!-- Keep this list in sync with the server's ListTools output. tests/readme.test.ts
+     fails if it drifts from src/cli/commands/mcp.ts. -->
+
+**Knowledge records**
+`get_records_for_symbol` `get_records_by_kind` `get_records_by_ref` `search_records` `add_record` `get_record_drift` `reindex`
+
+`get_records_for_symbol` walks method → class → file, returning every record that applies to a symbol and its containing scopes — the same knowledge the PreToolUse hook injects. `get_records_by_kind` is best for reading `rejected` before proposing an approach and `gotcha` before touching unfamiliar code. `get_records_by_ref` finds `source` records that point at a given document. `add_record` appends knowledge (call `reindex` after to make it queryable).
 
 **Symbol lookup**
-`search_symbols` `get_specs_for_symbol` `get_specs_for_symbol_with_context` `get_symbols_for_spec`
+`search_symbols` `get_undocumented_symbols`
 
-`get_specs_for_symbol_with_context` returns specs grouped by scope: the symbol itself, its containing class hierarchy, its file, and specs linked to 1-hop call-graph neighbours (callers and callees). Prefer it over `get_specs_for_symbol`.
+`get_undocumented_symbols` lists code symbols that no record is about — the gaps in coverage.
 
 **Call graph**
 `get_callers` `get_callees` `get_callers_transitive` `get_impact`

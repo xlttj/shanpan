@@ -6,7 +6,8 @@ import {
   CallToolRequestSchema,
   ListToolsRequestSchema,
 } from '@modelcontextprotocol/sdk/types.js';
-import { openDatabase, closeDatabase, dbExists, queryAll, escId } from '../../core/db.js';
+import { openDatabase, closeDatabase, dbExists, queryAll, escId, ensureSchema } from '../../core/db.js';
+import type { Connection } from '@ladybugdb/core';
 import { computeRecordDrift } from '../../core/record-drift.js';
 import {
   readRecords,
@@ -30,6 +31,47 @@ function textResult(text: string) {
 
 function jsonResult(data: unknown) {
   return textResult(JSON.stringify(data, null, 2));
+}
+
+/** Turn a low-level DB error into an agent-actionable recovery message. */
+export function diagnoseError(err: unknown): { content: { type: 'text'; text: string }[] } {
+  const msg = err instanceof Error ? err.message : String(err);
+  if (/binder|cannot find property|does not exist|no such|catalog|table/i.test(msg)) {
+    return textResult(
+      'specgraph: the graph database looks out of date — it likely predates a schema change ' +
+        `(${msg}). Rebuild it with 'specgraph analyze --full' then 'specgraph records index' ` +
+        '(or call the reindex tool), which recreates the graph against the current schema.',
+    );
+  }
+  return textResult(`specgraph error: ${msg}`);
+}
+
+/** True when knowledge.ndjson holds records the graph does not have indexed. */
+async function graphMissingRecords(projectDir: string, conn: Connection): Promise<number | null> {
+  const { rows } = await queryAll(conn, 'MATCH (r:Record) RETURN count(r) AS n');
+  if (Number(rows[0]?.['n'] ?? 0) > 0) return null;
+  const { records } = readRecords(projectDir);
+  return records.length > 0 ? records.length : null;
+}
+
+/**
+ * A record read returned nothing. Distinguish "genuinely no records" from
+ * "records exist on disk but the graph has none" — the latter is stale data
+ * masquerading as absence, which an agent would otherwise trust.
+ */
+async function emptyRecordResult(
+  projectDir: string,
+  conn: Connection,
+): Promise<{ content: { type: 'text'; text: string }[] }> {
+  const onDisk = await graphMissingRecords(projectDir, conn);
+  if (onDisk !== null) {
+    return textResult(
+      `specgraph: knowledge.ndjson holds ${onDisk} record(s) but none are indexed in the graph. ` +
+        "Run 'specgraph records index' (or call the reindex tool) to make them queryable. " +
+        'This is stale data, not an empty knowledge base.',
+    );
+  }
+  return jsonResult([]);
 }
 
 const CODE_SYMBOL_KINDS = [
@@ -305,7 +347,8 @@ export async function handleGetRecordsForSymbol(
       for (const row of rows) byId.set(String(row['id']), row);
     }
 
-    return jsonResult([...byId.values()]);
+    const out = [...byId.values()];
+    return out.length === 0 ? await emptyRecordResult(projectDir, conn) : jsonResult(out);
   } finally {
     await closeDatabase(db, conn);
   }
@@ -335,7 +378,8 @@ export async function handleSearchRecords(
       const hay = `${String(row['claim'] ?? '')} ${String(row['because'] ?? '')}`.toLowerCase();
       return hay.includes(needle);
     });
-    return jsonResult(hits.slice(0, limit));
+    const out = hits.slice(0, limit);
+    return out.length === 0 ? await emptyRecordResult(projectDir, conn) : jsonResult(out);
   } finally {
     await closeDatabase(db, conn);
   }
@@ -356,7 +400,7 @@ export async function handleGetRecordsByKind(
       `MATCH (r:Record) WHERE r.live AND r.kind = '${escId(kind)}'
        RETURN ${RECORD_RETURN} ORDER BY r.ts DESC`,
     );
-    return jsonResult(rows);
+    return rows.length === 0 ? await emptyRecordResult(projectDir, conn) : jsonResult(rows);
   } finally {
     await closeDatabase(db, conn);
   }
@@ -375,7 +419,7 @@ export async function handleGetRecordsByRef(
       `MATCH (r:Record) WHERE r.live AND r.ref = '${escId(ref)}'
        RETURN ${RECORD_RETURN} ORDER BY r.ts DESC`,
     );
-    return jsonResult(rows);
+    return rows.length === 0 ? await emptyRecordResult(projectDir, conn) : jsonResult(rows);
   } finally {
     await closeDatabase(db, conn);
   }
@@ -391,7 +435,16 @@ export async function handleGetRecordDrift(
 ): Promise<{ content: { type: 'text'; text: string }[] }> {
   const { db, conn } = await openDatabase(projectDir, true);
   try {
-    return jsonResult(await computeRecordDrift(conn, projectDir));
+    const report = await computeRecordDrift(conn, projectDir);
+    const onDisk = await graphMissingRecords(projectDir, conn);
+    // Surface the stale-graph state here too — this is the diagnostic tool an
+    // agent reaches for, and a "clean" drift report against an empty graph is a
+    // silent lie.
+    const graphStale =
+      onDisk !== null
+        ? `knowledge.ndjson has ${onDisk} record(s) but the graph has none indexed — run 'specgraph records index'.`
+        : null;
+    return jsonResult({ ...report, graphStale });
   } finally {
     await closeDatabase(db, conn);
   }
@@ -669,6 +722,7 @@ export async function runMcp(options: { projectDir?: string } = {}): Promise<voi
   }));
 
   server.setRequestHandler(CallToolRequestSchema, async (request) => {
+   try {
     const { name, arguments: args } = request.params;
     const a = (args ?? {}) as Record<string, unknown>;
 
@@ -814,7 +868,28 @@ export async function runMcp(options: { projectDir?: string } = {}): Promise<voi
     }
 
     return textResult(`Unknown tool: ${name}`);
+   } catch (err) {
+     // Never let a raw binder/connection error reach the agent as -32603 with
+     // no recovery path — translate it into an actionable message.
+     return diagnoseError(err);
+   }
   });
+
+  // Migrate an existing database to the current schema before serving. Handlers
+  // open read-only, so without this a database that predates a schema change
+  // would fail every query on a missing column with no chance to self-heal.
+  if (dbExists(projectDir)) {
+    try {
+      const { db, conn } = await openDatabase(projectDir);
+      try {
+        await ensureSchema(conn);
+      } finally {
+        await closeDatabase(db, conn);
+      }
+    } catch {
+      // Best-effort — if migration fails, per-call diagnoseError still guides.
+    }
+  }
 
   const transport = new StdioServerTransport();
   await server.connect(transport);
