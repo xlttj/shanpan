@@ -141,27 +141,26 @@ async function runOneAnalyze(
     if (verbose && process.stdout.isTTY && mode !== 'skip') process.stdout.write('\n');
     printResults(stats, verbose, mode);
 
-    // Rebuild records in the same pass. analyze recreates code symbols, so a
-    // record's ABOUT edges must be re-resolved against them; doing it here means
-    // one command keeps both symbols and knowledge current, and removes the
-    // "forgot to run records index" footgun where record queries return [].
-    if (mode !== 'skip') {
-      const { records, errors } = readRecords(projectDir);
-      if (records.length > 0 && errors.length === 0) {
-        const cleared = await conn.query('MATCH (r:Record) DETACH DELETE r');
-        if (!Array.isArray(cleared)) cleared.close();
-        const recStats = await indexRecords(conn, records, projectDir);
-        if (verbose) {
-          console.log(
-            chalk.cyan('  Records') + `           ${recStats.live} live` +
-              (recStats.unresolved.length > 0
-                ? chalk.yellow(` · ${recStats.unresolved.length} unresolved subject(s)`)
-                : ''),
-          );
-        }
-      } else if (records.length > 0 && errors.length > 0 && verbose) {
-        console.log(chalk.yellow(`  Records skipped — ${errors.length} invalid line(s); run 'specgraph records check'.`));
+    // Rebuild records in the same pass — always, even on a symbol 'skip'. The
+    // knowledge file changes independently of source (an agent adds a record
+    // without touching code), so gating this on symbol changes would leave a
+    // new record unindexed and its subject reported as drift. Rebuilding ~tens
+    // of records is cheap; the expensive symbol analysis stays gated by skip.
+    const { records, errors } = readRecords(projectDir);
+    if (records.length > 0 && errors.length === 0) {
+      const cleared = await conn.query('MATCH (r:Record) DETACH DELETE r');
+      if (!Array.isArray(cleared)) cleared.close();
+      const recStats = await indexRecords(conn, records, projectDir);
+      if (verbose) {
+        console.log(
+          chalk.cyan('  Records') + `           ${recStats.live} live` +
+            (recStats.unresolved.length > 0
+              ? chalk.yellow(` · ${recStats.unresolved.length} unresolved subject(s)`)
+              : ''),
+        );
       }
+    } else if (records.length > 0 && errors.length > 0 && verbose) {
+      console.log(chalk.yellow(`  Records skipped — ${errors.length} invalid line(s); run 'specgraph records check'.`));
     }
   } finally {
     await closeDatabase(db, conn);
