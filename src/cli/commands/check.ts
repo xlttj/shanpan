@@ -53,16 +53,24 @@ function escList(paths: string[]): string {
   return paths.map((p) => `'${escId(p)}'`).join(', ');
 }
 
-export type HookFormat = 'claude' | 'cursor';
+export type HookFormat = 'claude' | 'cursor' | 'opencode';
 
 /**
  * Claude Code blocks a Stop with decision/reason. Cursor's native `stop` hook
  * has no block field at all — the only way to feed text back to the model is
- * followup_message, which it auto-submits as the next user message.
+ * followup_message, which it auto-submits as the next user message. OpenCode
+ * config shell hooks ignore stdout JSON; the specgraph-drift plugin reads the
+ * opencode dialect and calls client.session.prompt on session.idle.
  */
 export function blockResponse(format: HookFormat, reason: string): string {
   if (format === 'cursor') return JSON.stringify({ followup_message: reason });
+  if (format === 'opencode') return JSON.stringify({ prompt: reason });
   return JSON.stringify({ decision: 'block', reason });
+}
+
+export function parseHookFormat(value: string): HookFormat {
+  if (value === 'cursor' || value === 'opencode') return value;
+  return 'claude';
 }
 
 async function runHookOutputCheck(projectDir: string, format: HookFormat): Promise<void> {

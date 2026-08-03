@@ -1,4 +1,5 @@
 {
+  "$schema": "https://opencode.ai/config.json",
   "experimental": {
     "hook": {
       "file_edited": [
@@ -13,10 +14,20 @@
         {
           "command": [
             "specgraph",
-            "check",
-            "--hook-output"
+            "check"
           ]
         }
+      ]
+    }
+  },
+  "mcp": {
+    "specgraph": {
+      "type": "local",
+      "command": [
+        "specgraph",
+        "mcp",
+        "--project-dir",
+        "/Users/axel.tietje/Code/xlttj/chi"
       ]
     }
   }

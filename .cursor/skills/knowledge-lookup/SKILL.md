@@ -37,6 +37,11 @@ How knowledge reaches you depends on the IDE:
   a matching file is in context. Hooks regenerate rules on sessionStart and
   after Write. **Call "get_records_for_symbol" yourself before editing** when
   the file is not yet in context or you need more than the attached rule shows.
+- **OpenCode**: no pre-edit injection and no rules generator. Knowledge is
+  MCP-only — always call "get_records_for_symbol" before editing. The
+  specgraph-drift plugin on session.idle surfaces record drift via
+  check --format opencode; config shell hooks only run analyze and a plain
+  check for logging.
 
 Use the MCP tools whenever the automatic path might have missed something.
 

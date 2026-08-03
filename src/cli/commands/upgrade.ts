@@ -1,6 +1,6 @@
 import chalk from 'chalk';
 import { dbExists } from '../../core/db.js';
-import { installIdeHooks } from '../../core/ide-hooks.js';
+import { installIdeHooks, installOpenCodePlugin } from '../../core/ide-hooks.js';
 import { writeSkills, promptIdeSelection } from './init.js';
 
 export async function runUpgrade(options: { hooks?: boolean }): Promise<void> {
@@ -22,7 +22,11 @@ export async function runUpgrade(options: { hooks?: boolean }): Promise<void> {
     const selectedIdes = await promptIdeSelection(projectDir);
     for (const ide of selectedIdes) {
       installIdeHooks(projectDir, ide);
+      if (ide.id === 'opencode') installOpenCodePlugin(projectDir);
       console.log(chalk.green(`✓ Updated agent hooks in ${ide.settingsPath}`));
+      if (ide.id === 'opencode') {
+        console.log(chalk.green('✓ Updated OpenCode drift plugin in .opencode/plugin/specgraph-drift.ts'));
+      }
     }
     if (selectedIdes.length === 0) {
       console.log(chalk.gray('  Skipped agent hooks.'));

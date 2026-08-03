@@ -6,7 +6,7 @@ import { openDatabase, closeDatabase, ensureSchema, getDbPath, DB_DIR } from '..
 import { saveConfig, RC_FILE } from '../../core/config.js';
 import { DEFAULT_CONFIG } from '../../types/config.js';
 import { SKILLS } from '../../skills/index.js';
-import { IDE_INTEGRATIONS, installIdeHooks, type IdeIntegration } from '../../core/ide-hooks.js';
+import { IDE_INTEGRATIONS, installIdeHooks, installOpenCodePlugin, type IdeIntegration } from '../../core/ide-hooks.js';
 
 const SKILL_CLIENT_DIRS = ['.claude', '.cursor', '.opencode'] as const;
 
@@ -36,8 +36,9 @@ export function writeSkills(projectDir: string): string[] {
   const currentNames = new Set(SKILLS.map((s) => s.name));
   for (const clientDir of SKILL_CLIENT_DIRS) {
     const clientPath = path.join(projectDir, clientDir);
-    // Always write to .claude/; only write to others if the client dir already exists
-    if (clientDir !== '.claude' && !fs.existsSync(clientPath)) continue;
+    const hasOpencodeJson =
+      clientDir === '.opencode' && fs.existsSync(path.join(projectDir, 'opencode.json'));
+    if (clientDir !== '.claude' && !fs.existsSync(clientPath) && !hasOpencodeJson) continue;
     const skillsBase = path.join(clientPath, 'skills');
     pruneStaleSkills(skillsBase, currentNames);
     for (const skill of SKILLS) {
@@ -53,6 +54,7 @@ export function writeSkills(projectDir: string): string[] {
 
 function detectIdes(projectDir: string): IdeIntegration[] {
   return IDE_INTEGRATIONS.filter((ide) => {
+    if (fs.existsSync(path.join(projectDir, ide.settingsPath))) return true;
     const probe = ide.detectionPath ?? path.dirname(ide.settingsPath);
     return fs.existsSync(path.join(projectDir, probe));
   });
@@ -67,8 +69,8 @@ function buildMenuOptions(detected: IdeIntegration[]): string {
 
 export async function promptIdeSelection(projectDir: string): Promise<IdeIntegration[]> {
   if (!process.stdin.isTTY) {
-    // Non-interactive: default to Claude Code
-    return [IDE_INTEGRATIONS[0]!];
+    const detected = detectIdes(projectDir);
+    return detected.length > 0 ? detected : [IDE_INTEGRATIONS[0]!];
   }
 
   const detected = detectIdes(projectDir);
@@ -136,7 +138,11 @@ export async function runInit(): Promise<void> {
 
   for (const ide of selectedIdes) {
     installIdeHooks(projectDir, ide);
+    if (ide.id === 'opencode') installOpenCodePlugin(projectDir);
     console.log(chalk.green(`✓ Wrote agent hooks to ${ide.settingsPath}`));
+    if (ide.id === 'opencode') {
+      console.log(chalk.green('✓ Wrote OpenCode drift plugin to .opencode/plugin/specgraph-drift.ts'));
+    }
   }
   if (selectedIdes.length === 0) {
     console.log(chalk.gray('  Skipped agent hooks. To add later, configure your IDE settings manually.'));

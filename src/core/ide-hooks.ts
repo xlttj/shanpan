@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import { specgraphDriftPluginSource } from '../opencode/specgraph-drift.plugin.js';
 
 export interface IdeIntegration {
   id: string;
@@ -88,15 +89,16 @@ export const cursorIntegration: IdeIntegration = {
   buildHooksConfig: () => CURSOR_HOOKS_CONFIG,
 };
 
+/**
+ * OpenCode experimental shell hooks sync the graph but cannot read hook JSON.
+ * Drift feedback to the agent goes through the specgraph-drift plugin on
+ * session.idle, which calls check --hook-output --format opencode.
+ */
 const OPENCODE_HOOKS_CONFIG = {
   experimental: {
     hook: {
-      file_edited: [
-        { command: ['specgraph', 'analyze'] },
-      ],
-      session_completed: [
-        { command: ['specgraph', 'check', '--hook-output'] },
-      ],
+      file_edited: [{ command: ['specgraph', 'analyze'] }],
+      session_completed: [{ command: ['specgraph', 'check'] }],
     },
   },
 };
@@ -171,4 +173,10 @@ export function mergeSettings(filePath: string, newConfig: object): void {
 export function installIdeHooks(projectDir: string, ide: IdeIntegration): void {
   const filePath = path.resolve(projectDir, ide.settingsPath);
   mergeSettings(filePath, ide.buildHooksConfig());
+}
+
+export function installOpenCodePlugin(projectDir: string): void {
+  const pluginDir = path.join(projectDir, '.opencode', 'plugin');
+  fs.mkdirSync(pluginDir, { recursive: true });
+  fs.writeFileSync(path.join(pluginDir, 'specgraph-drift.ts'), specgraphDriftPluginSource, 'utf-8');
 }

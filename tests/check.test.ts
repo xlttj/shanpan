@@ -127,4 +127,18 @@ describe('blockResponse (Stop hook dialects)', () => {
     const { blockResponse } = await import('../src/cli/commands/check.js');
     expect(JSON.parse(blockResponse('cursor', 'a\n\nb')).followup_message).toBe('a\n\nb');
   });
+
+  it('uses prompt for OpenCode, consumed by the specgraph-drift plugin', async () => {
+    const { blockResponse } = await import('../src/cli/commands/check.js');
+    expect(JSON.parse(blockResponse('opencode', 'drift found'))).toEqual({
+      prompt: 'drift found',
+    });
+  });
+
+  it('parseHookFormat defaults unknown values to claude', async () => {
+    const { parseHookFormat } = await import('../src/cli/commands/check.js');
+    expect(parseHookFormat('cursor')).toBe('cursor');
+    expect(parseHookFormat('opencode')).toBe('opencode');
+    expect(parseHookFormat('anything-else')).toBe('claude');
+  });
 });

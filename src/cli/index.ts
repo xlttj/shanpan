@@ -4,7 +4,7 @@ import { runStatus } from './commands/status.js';
 import { runQuery } from './commands/query.js';
 import { runMcp } from './commands/mcp.js';
 import { runAnalyze } from './commands/analyze.js';
-import { runCheck } from './commands/check.js';
+import { runCheck, parseHookFormat } from './commands/check.js';
 import { runUpgrade } from './commands/upgrade.js';
 import { runContext } from './commands/context.js';
 import { runRules } from './commands/rules.js';
@@ -69,12 +69,12 @@ program
   .description('Check that knowledge records still match the code')
   .option('--staged', 'Check staged git changes for deletions/renames')
   .option('--hook-output', 'Output JSON for use in IDE Stop hooks')
-  .option('--format <ide>', 'Hook output dialect: claude | cursor', 'claude')
+  .option('--format <ide>', 'Hook output dialect: claude | cursor | opencode', 'claude')
   .action((opts) =>
     runCheck({
       staged: !!opts.staged,
       hookOutput: !!opts.hookOutput,
-      format: opts.format === 'cursor' ? 'cursor' : 'claude',
+      format: parseHookFormat(opts.format as string),
     }),
   );
 

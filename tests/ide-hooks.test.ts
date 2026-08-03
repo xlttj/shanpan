@@ -5,9 +5,12 @@ import os from 'node:os';
 import {
   mergeSettings,
   installIdeHooks,
+  installOpenCodePlugin,
   claudeCodeIntegration,
   cursorIntegration,
+  openCodeIntegration,
 } from '../src/core/ide-hooks.js';
+import { PLUGIN_MARKER } from '../src/opencode/specgraph-drift.plugin.js';
 
 let tmpDir: string;
 
@@ -111,6 +114,37 @@ describe('cursor integration', () => {
     installIdeHooks(tmpDir, cursorIntegration);
     const s = readSettings('.cursor/hooks.json') as any;
     expect(s.hooks.preToolUse).toBeUndefined();
+  });
+});
+
+describe('OpenCode integration', () => {
+  it('writes opencode.json with experimental shell hooks', () => {
+    installIdeHooks(tmpDir, openCodeIntegration);
+    const s = readSettings('opencode.json') as any;
+    expect(s.experimental.hook.file_edited[0].command).toEqual(['specgraph', 'analyze']);
+    expect(s.experimental.hook.session_completed[0].command).toEqual(['specgraph', 'check']);
+  });
+
+  it('does not use --hook-output on session_completed — config hooks ignore stdout JSON', () => {
+    installIdeHooks(tmpDir, openCodeIntegration);
+    const raw = fs.readFileSync(path.join(tmpDir, 'opencode.json'), 'utf-8');
+    expect(raw).not.toContain('--hook-output');
+  });
+
+  it('installs the drift plugin template', () => {
+    installOpenCodePlugin(tmpDir);
+    const pluginPath = path.join(tmpDir, '.opencode/plugin/specgraph-drift.ts');
+    expect(fs.existsSync(pluginPath)).toBe(true);
+    expect(fs.readFileSync(pluginPath, 'utf-8')).toContain(PLUGIN_MARKER);
+    expect(fs.readFileSync(pluginPath, 'utf-8')).toContain('session.idle');
+  });
+
+  it('is idempotent — running twice does not duplicate hooks', () => {
+    installIdeHooks(tmpDir, openCodeIntegration);
+    installIdeHooks(tmpDir, openCodeIntegration);
+    const s = readSettings('opencode.json') as any;
+    expect(s.experimental.hook.file_edited).toHaveLength(1);
+    expect(s.experimental.hook.session_completed).toHaveLength(1);
   });
 });
 

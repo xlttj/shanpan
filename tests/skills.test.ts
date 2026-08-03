@@ -67,11 +67,17 @@ describe('writeSkills', () => {
     expect(fs.existsSync(junk)).toBe(true);
   });
 
-  it('only writes to .cursor/.opencode when those client dirs already exist', () => {
+  it('writes to .cursor when that client dir exists', () => {
     fs.mkdirSync(path.join(tmpDir, '.cursor'), { recursive: true });
     const written = writeSkills(tmpDir);
     expect(written).toContain(path.join('.claude', 'skills'));
     expect(written).toContain(path.join('.cursor', 'skills'));
     expect(written).not.toContain(path.join('.opencode', 'skills'));
+  });
+
+  it('writes to .opencode when opencode.json exists even without .opencode/', () => {
+    fs.writeFileSync(path.join(tmpDir, 'opencode.json'), '{}');
+    const written = writeSkills(tmpDir);
+    expect(written).toContain(path.join('.opencode', 'skills'));
   });
 });
