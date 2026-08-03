@@ -26,6 +26,7 @@ function toRecord(row: Record<string, unknown>): ContextRecord {
     claim: String(row['claim']),
     because: row['because'] == null ? null : String(row['because']),
     provenance: String(row['provenance']),
+    ref: row['ref'] == null ? null : String(row['ref']),
   };
 }
 
@@ -39,11 +40,11 @@ export async function fetchRecordsByFile(conn: Connection): Promise<FileRecords[
     `MATCH (r:Record)-[:ABOUT]->(c:CodeSymbol)
      WHERE r.live
      RETURN DISTINCT c.file_path AS file, r.id AS id, r.kind AS kind,
-                     r.claim AS claim, r.because AS because, r.provenance AS provenance`,
+                     r.claim AS claim, r.because AS because, r.provenance AS provenance, r.ref AS ref`,
     `MATCH (r:Record)-[:ABOUT]->(f:File)
      WHERE r.live
      RETURN DISTINCT f.id AS file, r.id AS id, r.kind AS kind,
-                     r.claim AS claim, r.because AS because, r.provenance AS provenance`,
+                     r.claim AS claim, r.because AS because, r.provenance AS provenance, r.ref AS ref`,
   ];
 
   const byFile = new Map<string, Map<string, ContextRecord>>();

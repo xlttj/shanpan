@@ -64,11 +64,11 @@ async function fetchRecords(
       `MATCH (r:Record)-[:ABOUT]->(c:CodeSymbol {file_path: '${esc}'})
        WHERE r.live
        RETURN DISTINCT r.id AS id, r.kind AS kind, r.claim AS claim,
-                       r.because AS because, r.provenance AS provenance`,
+                       r.because AS because, r.provenance AS provenance, r.ref AS ref`,
       `MATCH (r:Record)-[:ABOUT]->(f:File {id: '${esc}'})
        WHERE r.live
        RETURN DISTINCT r.id AS id, r.kind AS kind, r.claim AS claim,
-                       r.because AS because, r.provenance AS provenance`,
+                       r.because AS because, r.provenance AS provenance, r.ref AS ref`,
     ];
     for (const cypher of queries) {
       const { rows } = await queryAll(conn, cypher);
@@ -81,6 +81,7 @@ async function fetchRecords(
           claim: String(row['claim']),
           because: row['because'] == null ? null : String(row['because']),
           provenance: String(row['provenance']),
+          ref: row['ref'] == null ? null : String(row['ref']),
         });
       }
     }

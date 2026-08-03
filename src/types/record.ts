@@ -16,6 +16,7 @@ export const RECORD_KINDS = [
   'gotcha',     // non-obvious trap
   'intent',     // why this exists at all
   'conflict',   // sources disagree — needs human adjudication
+  'source',     // for topic <cl>, consult document <rf>
 ] as const;
 
 export type RecordKind = (typeof RECORD_KINDS)[number];
@@ -27,7 +28,7 @@ export type RecordKind = (typeof RECORD_KINDS)[number];
  * agents guess):
  *   id → id          kn → kind        sb → subject     cl → claim
  *   bc → because     pv → provenance  ts → timestamp   ss → supersedes
- *   gv → given       wn → when        tn → then
+ *   gv → given       wn → when        tn → then        rf → ref
  */
 export interface KnowledgeRecord {
   /** Stable short id, unique within the knowledge base. */
@@ -36,7 +37,7 @@ export interface KnowledgeRecord {
   kn: RecordKind;
   /** Subjects: CodeSymbol ids or bare file paths this record is about. */
   sb?: string[];
-  /** The claim itself. For `behavior`, this is the scenario name. */
+  /** The claim itself. For `behavior`, the scenario name; for `source`, the topic. */
   cl: string;
   /** Why the claim holds. Absent is legal; fabricated is not. */
   bc?: string;
@@ -52,6 +53,11 @@ export interface KnowledgeRecord {
   wn?: string;
   /** behavior only: the expected outcome. */
   tn?: string;
+  /**
+   * source only, required there: the document to consult — a URL or a
+   * repo-relative path. One source per record; two sources are two records.
+   */
+  rf?: string;
 }
 
 /**

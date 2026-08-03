@@ -33,6 +33,7 @@ export const SCHEMA_STATEMENTS = [
     given STRING,
     when_ STRING,
     then_ STRING,
+    ref STRING,
     provenance STRING,
     provenance_kind STRING,
     ts TIMESTAMP,
@@ -53,6 +54,17 @@ export const SCHEMA_STATEMENTS = [
 export const SCHEMA_TABLE_NAMES = [
   'CodeSymbol', 'File', 'CONTAINS', 'CALLS',
   'Record', 'ABOUT', 'SUPERSEDES',
+];
+
+/**
+ * Idempotent column additions for tables that already exist in an older
+ * database. Each is run inside a try/catch — a fresh table already has the
+ * column (the CREATE above includes it) and the ALTER simply fails, which is
+ * fine. `ensureSchema` only creates a *missing* table, so an existing Record
+ * table would never gain a new column without this.
+ */
+export const SCHEMA_MIGRATIONS = [
+  'ALTER TABLE Record ADD ref STRING',
 ];
 
 /** Tables to drop in dependency order (edges before nodes). */

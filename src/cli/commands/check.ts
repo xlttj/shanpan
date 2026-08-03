@@ -163,6 +163,15 @@ export async function runCheck(options: {
           console.log(chalk.gray(`     ${d.claim}`));
         }
       }
+      // Soft, human-only: a source record's local document is gone. Never a
+      // hard failure — the doc may have moved, and a URL cannot be checked.
+      if (report.missingRefs.length > 0) {
+        console.log(chalk.yellow(`⚠ ${report.missingRefs.length} source document(s) not found:`));
+        for (const m of report.missingRefs) {
+          console.log(chalk.yellow(`  ${m.recordId} → ${m.ref}`));
+          console.log(chalk.gray(`     ${m.claim} — supersede with the new location if it moved`));
+        }
+      }
       if (report.invalidRecords.length > 0) process.exitCode = 1;
     } finally {
       await closeDatabase(db, conn);

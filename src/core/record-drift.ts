@@ -11,9 +11,27 @@ export interface RecordDriftEntry {
   claim: string;
 }
 
+export interface MissingRefEntry {
+  recordId: string;
+  ref: string;
+  claim: string;
+}
+
 export interface RecordDriftReport {
   unresolved: RecordDriftEntry[];
   invalidRecords: RecordValidationError[];
+  /**
+   * Source records whose local `rf` document no longer exists. Kept separate
+   * from `unresolved` on purpose: a moved doc is a soft signal for humans, and
+   * a URL cannot be checked offline, so this must NEVER feed the Stop hook or a
+   * dead link would trap the agent.
+   */
+  missingRefs: MissingRefEntry[];
+}
+
+/** A ref is a local path we can existence-check; a URL is not. */
+function isLocalRef(ref: string): boolean {
+  return !/^[a-z][a-z0-9+.-]*:\/\//i.test(ref);
 }
 
 /**
@@ -35,6 +53,7 @@ export async function computeRecordDrift(
 
   const live = liveIds(records);
   const unresolved: RecordDriftEntry[] = [];
+  const missingRefs: MissingRefEntry[] = [];
   for (const rec of records) {
     if (!live.has(rec.id)) continue;
     for (const subject of rec.sb ?? []) {
@@ -42,9 +61,12 @@ export async function computeRecordDrift(
         unresolved.push({ recordId: rec.id, subject, claim: rec.cl });
       }
     }
+    if (rec.rf && isLocalRef(rec.rf) && !fs.existsSync(path.resolve(projectDir, rec.rf))) {
+      missingRefs.push({ recordId: rec.id, ref: rec.rf, claim: rec.cl });
+    }
   }
 
-  return { unresolved, invalidRecords: errors };
+  return { unresolved, invalidRecords: errors, missingRefs };
 }
 
 const DRIFT_CACHE_FILE = 'last-drift-report.json';

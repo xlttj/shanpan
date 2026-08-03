@@ -138,6 +138,7 @@ records
   .option('--given <text>', 'behavior only: precondition')
   .option('--when <text>', 'behavior only: triggering event')
   .option('--then <text>', 'behavior only: expected outcome')
+  .option('--ref <doc>', 'source only: the document to consult (URL or repo-relative path)')
   .option('--supersedes <id>', 'Record id this one replaces')
   .action((opts) =>
     runRecordsAdd({
@@ -149,6 +150,7 @@ records
       given: opts.given as string | undefined,
       when: opts.when as string | undefined,
       then: opts.then as string | undefined,
+      ref: opts.ref as string | undefined,
       supersedes: opts.supersedes as string | undefined,
     }),
   );

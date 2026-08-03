@@ -253,7 +253,7 @@ export async function handleSearchSymbols(
 const RECORD_RETURN =
   `r.id AS id, r.kind AS kind, r.claim AS claim, r.because AS because,
    r.given AS given, r.when_ AS whenClause, r.then_ AS thenClause,
-   r.provenance AS provenance, r.ts AS ts`;
+   r.ref AS ref, r.provenance AS provenance, r.ts AS ts`;
 
 /**
  * Records attached to a symbol, to its containing file, and — when the symbol
@@ -362,6 +362,25 @@ export async function handleGetRecordsByKind(
   }
 }
 
+/** Live source records pointing at a given document — the reverse of a source pointer. */
+export async function handleGetRecordsByRef(
+  projectDir: string,
+  ref: string,
+): Promise<{ content: { type: 'text'; text: string }[] }> {
+  if (!ref) return jsonResult([]);
+  const { db, conn } = await openDatabase(projectDir, true);
+  try {
+    const { rows } = await queryAll(
+      conn,
+      `MATCH (r:Record) WHERE r.live AND r.ref = '${escId(ref)}'
+       RETURN ${RECORD_RETURN} ORDER BY r.ts DESC`,
+    );
+    return jsonResult(rows);
+  } finally {
+    await closeDatabase(db, conn);
+  }
+}
+
 /**
  * Subjects that resolve to no CodeSymbol and no File.
  * Recomputed from disk rather than the graph, so it stays correct even when
@@ -387,6 +406,7 @@ export interface AddRecordArgs {
   given?: string;
   when?: string;
   then?: string;
+  ref?: string;
   supersedes?: string;
 }
 
@@ -422,6 +442,7 @@ export async function handleAddRecord(
   if (args.given) rec.gv = args.given;
   if (args.when) rec.wn = args.when;
   if (args.then) rec.tn = args.then;
+  if (args.ref) rec.rf = args.ref;
   if (args.supersedes) rec.ss = args.supersedes;
 
   const problems = validateRecord(rec, 0);
@@ -601,12 +622,12 @@ export async function runMcp(options: { projectDir?: string } = {}): Promise<voi
       {
         name: 'add_record',
         description:
-          'Append a knowledge record. Use when you learn something durable: a trap, an invariant, a decision and its reason, or an approach that was tried and abandoned. Set provenance to u when the user stated it, a when you observed it while working, i when you inferred it without a hard source. given/when/then are only valid on kind behavior, where when and then are required.',
+          'Append a knowledge record. Use when you learn something durable: a trap, an invariant, a decision and its reason, or an approach that was tried and abandoned. Set provenance to u when the user stated it, a when you observed it while working, i when you inferred it without a hard source. given/when/then are only valid on kind behavior, where when and then are required. For kind source, claim is the topic and ref (required) is the document to consult; add subjects to surface it when related code is edited.',
         inputSchema: {
           type: 'object',
           properties: {
             kind: { type: 'string', enum: [...RECORD_KINDS], description: 'Record kind' },
-            claim: { type: 'string', description: 'The claim; for behavior, the scenario name' },
+            claim: { type: 'string', description: 'The claim; for behavior the scenario name; for source the topic' },
             because: { type: 'string', description: 'Why the claim holds — omit rather than invent' },
             subjects: {
               type: 'array',
@@ -620,9 +641,22 @@ export async function runMcp(options: { projectDir?: string } = {}): Promise<voi
             given: { type: 'string', description: 'behavior only: precondition' },
             when: { type: 'string', description: 'behavior only: single triggering event' },
             then: { type: 'string', description: 'behavior only: expected outcome' },
+            ref: { type: 'string', description: 'source only, required: the document — a URL or repo-relative path' },
             supersedes: { type: 'string', description: 'Record id this one replaces' },
           },
           required: ['kind', 'claim'],
+        },
+      },
+      {
+        name: 'get_records_by_ref',
+        description:
+          'Find source records that point at a given document (URL or repo-relative path). The inverse of reading a source pointer — answers "which topics cite this document?".',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            ref: { type: 'string', description: 'Exact document URL or path to look up' },
+          },
+          required: ['ref'],
         },
       },
       {
@@ -756,6 +790,10 @@ export async function runMcp(options: { projectDir?: string } = {}): Promise<voi
       return handleGetRecordsByKind(projectDir, String(a['kind'] ?? ''));
     }
 
+    if (name === 'get_records_by_ref') {
+      return handleGetRecordsByRef(projectDir, String(a['ref'] ?? ''));
+    }
+
     if (name === 'get_record_drift') {
       return handleGetRecordDrift(projectDir);
     }
@@ -770,6 +808,7 @@ export async function runMcp(options: { projectDir?: string } = {}): Promise<voi
         given: typeof a['given'] === 'string' ? a['given'] : undefined,
         when: typeof a['when'] === 'string' ? a['when'] : undefined,
         then: typeof a['then'] === 'string' ? a['then'] : undefined,
+        ref: typeof a['ref'] === 'string' ? a['ref'] : undefined,
         supersedes: typeof a['supersedes'] === 'string' ? a['supersedes'] : undefined,
       });
     }

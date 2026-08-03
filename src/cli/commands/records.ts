@@ -82,6 +82,7 @@ export interface RecordsAddOptions {
   given?: string;
   when?: string;
   then?: string;
+  ref?: string;
   supersedes?: string;
 }
 
@@ -119,6 +120,7 @@ export async function runRecordsAdd(opts: RecordsAddOptions): Promise<void> {
   if (opts.given) rec.gv = opts.given;
   if (opts.when) rec.wn = opts.when;
   if (opts.then) rec.tn = opts.then;
+  if (opts.ref) rec.rf = opts.ref;
   if (opts.supersedes) rec.ss = opts.supersedes;
 
   const problems = validateRecord(rec, 0);

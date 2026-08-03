@@ -42,24 +42,25 @@ describe('context hook output contract', () => {
 });
 
 describe('record injection', () => {
-  function r(id: string, kind: string, over: Partial<{ claim: string; because: string | null; provenance: string }> = {}) {
+  function r(id: string, kind: string, over: Partial<{ claim: string; because: string | null; provenance: string; ref: string | null }> = {}) {
     return {
       id,
       kind,
       claim: over.claim ?? `claim ${id}`,
       because: over.because === undefined ? null : over.because,
       provenance: over.provenance ?? 'a',
+      ref: over.ref === undefined ? null : over.ref,
     };
   }
 
-  it('puts traps and invariants before background', async () => {
+  it('puts traps and invariants before background, source after decision', async () => {
     const { sortRecords } = await import('../src/cli/commands/context.js');
     const sorted = sortRecords([
       r('aa', 'intent'), r('bb', 'decision'), r('cc', 'gotcha'),
-      r('dd', 'constraint'), r('ee', 'rejected'),
+      r('dd', 'constraint'), r('ee', 'rejected'), r('ff', 'source'),
     ]);
     expect(sorted.map((x) => x.kind)).toEqual([
-      'gotcha', 'constraint', 'rejected', 'decision', 'intent',
+      'gotcha', 'constraint', 'rejected', 'decision', 'source', 'intent',
     ]);
   });
 
@@ -80,6 +81,12 @@ describe('record injection', () => {
     const lines = formatRecords([r('ab12cd', 'gotcha', { claim: 'do not X', because: 'it breaks Y', provenance: 'g:abc123' })]);
     expect(lines).toHaveLength(1);
     expect(lines[0]).toBe('  • [gotcha] do not X — it breaks Y  (ab12cd, g:abc123)');
+  });
+
+  it('renders a source record as a pointer to the document', async () => {
+    const { formatRecords } = await import('../src/cli/commands/context.js');
+    const lines = formatRecords([r('ab12cd', 'source', { claim: 'VAT rounding', ref: 'docs/tax/vat.md', provenance: 'u' })]);
+    expect(lines[0]).toBe('  • [source] VAT rounding → consult docs/tax/vat.md  (ab12cd, u)');
   });
 
   it('omits the reason clause when a record has no because', async () => {

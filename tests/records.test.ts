@@ -126,6 +126,24 @@ describe('validateRecord', () => {
     expect(errs.some((e) => e.message.includes("only valid on kind 'behavior'"))).toBe(true);
   });
 
+  it('requires rf on a source record', () => {
+    const errs = validateRecord(rec({ kn: 'source', cl: 'VAT rounding' }), 1);
+    expect(errs.some((e) => e.message.includes("'source' requires 'rf'"))).toBe(true);
+  });
+
+  it('accepts a complete source record', () => {
+    const errs = validateRecord(
+      rec({ kn: 'source', cl: 'VAT rounding', rf: 'docs/tax/vat.md', sb: ['src/tax/Vat.ts'] }),
+      1,
+    );
+    expect(errs).toEqual([]);
+  });
+
+  it('forbids rf on a non-source kind', () => {
+    const errs = validateRecord(rec({ kn: 'decision', rf: 'docs/x.md' }), 1);
+    expect(errs.some((e) => e.message.includes("'rf' is only valid on kind 'source'"))).toBe(true);
+  });
+
   it('accepts every bare provenance token', () => {
     for (const pv of ['u', 'a', 'i']) {
       expect(validateRecord(rec({ pv }), 1)).toEqual([]);
@@ -172,6 +190,13 @@ describe('serializeRecord', () => {
   it('omits undefined optional fields entirely', () => {
     expect(serializeRecord(rec())).not.toContain('null');
     expect(serializeRecord(rec())).not.toContain('"bc"');
+  });
+
+  it('places rf between tn and pv in canonical order', () => {
+    const line = serializeRecord({
+      id: 'aa11bb', kn: 'source', cl: 'topic', rf: 'docs/x.md', pv: 'u', ts: '20260617143022',
+    } as KnowledgeRecord);
+    expect(line).toBe('{"id":"aa11bb","kn":"source","cl":"topic","rf":"docs/x.md","pv":"u","ts":"20260617143022"}');
   });
 
   it('produces exactly one line (merge=union depends on this)', () => {
@@ -312,6 +337,7 @@ describe('record MCP handlers', () => {
       rec({ id: 'ddd444', kn: 'rejected', cl: 'tried caching results', bc: 'invalidation was unsolvable' }),
       rec({ id: 'eee555', kn: 'decision', cl: 'old ruling', sb: ['src/a.ts::Svc'] }),
       rec({ id: 'fff666', kn: 'decision', cl: 'new ruling', sb: ['src/a.ts::Svc'], ss: 'eee555' }),
+      rec({ id: 'sss777', kn: 'source', cl: 'service protocol', rf: 'https://wiki/svc', sb: ['src/a.ts::Svc'] }),
     ];
     appendRecords(dbDir, recs);
     await indexRecords(conn, recs);
@@ -356,6 +382,36 @@ describe('record MCP handlers', () => {
     const { handleGetRecordsForSymbol } = await import('../src/cli/commands/mcp.js');
     const out = parsed(await handleGetRecordsForSymbol(dbDir, 'src/a.ts::Svc', true));
     expect(out.map((r: { id: string }) => r.id)).toContain('eee555');
+  });
+
+  it('carries a source record and its ref when fetching for a symbol', async () => {
+    const { handleGetRecordsForSymbol } = await import('../src/cli/commands/mcp.js');
+    const out = parsed(await handleGetRecordsForSymbol(dbDir, 'src/a.ts::Svc'));
+    const src = out.find((r: { id: string }) => r.id === 'sss777');
+    expect(src).toBeDefined();
+    expect(src.ref).toBe('https://wiki/svc');
+    expect(src.kind).toBe('source');
+  });
+
+  it('finds source records by the document they point at', async () => {
+    const { handleGetRecordsByRef } = await import('../src/cli/commands/mcp.js');
+    const out = parsed(await handleGetRecordsByRef(dbDir, 'https://wiki/svc'));
+    expect(out.map((r: { id: string }) => r.id)).toEqual(['sss777']);
+  });
+
+  it('returns nothing for an unknown ref', async () => {
+    const { handleGetRecordsByRef } = await import('../src/cli/commands/mcp.js');
+    expect(parsed(await handleGetRecordsByRef(dbDir, 'https://nope'))).toEqual([]);
+  });
+
+  it('add_record accepts a source with ref and rejects one without', async () => {
+    const { handleAddRecord } = await import('../src/cli/commands/mcp.js');
+    const ok = await handleAddRecord(dbDir, {
+      kind: 'source', claim: 'billing rules', ref: 'docs/billing.md',
+    });
+    expect(ok.content[0]!.text).toContain('Created record');
+    const bad = await handleAddRecord(dbDir, { kind: 'source', claim: 'no ref here' });
+    expect(bad.content[0]!.text).toContain('not valid');
   });
 
   it('returns each record once even when several subjects match', async () => {
@@ -433,6 +489,18 @@ describe('record MCP handlers', () => {
     const out = parsed(await handleGetRecordDrift(dbDir));
     expect(out.unresolved).toEqual([]);
     expect(out.invalidRecords).toEqual([]);
+  });
+
+  it('flags a source record whose local document is missing — but never a URL', async () => {
+    const { handleAddRecord, handleGetRecordDrift } = await import('../src/cli/commands/mcp.js');
+    await handleAddRecord(dbDir, { kind: 'source', claim: 'gone doc', ref: 'docs/missing.md' });
+    await handleAddRecord(dbDir, { kind: 'source', claim: 'external', ref: 'https://example.com/x' });
+    const out = parsed(await handleGetRecordDrift(dbDir));
+    const refs = out.missingRefs.map((m: { ref: string }) => m.ref);
+    expect(refs).toContain('docs/missing.md');
+    expect(refs).not.toContain('https://example.com/x'); // URLs are never checked
+    // A missing document is soft — it must not surface as hard subject drift.
+    expect(out.unresolved.map((u: { recordId: string }) => u.recordId)).not.toContain('sss777');
   });
 });
 

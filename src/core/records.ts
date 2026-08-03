@@ -16,7 +16,7 @@ export const ARCHIVE_FILE = 'knowledge.archive.ndjson';
 
 /** Canonical key order — keeps diffs stable across writers. */
 const KEY_ORDER: (keyof KnowledgeRecord)[] = [
-  'id', 'kn', 'sb', 'cl', 'bc', 'gv', 'wn', 'tn', 'pv', 'ts', 'ss',
+  'id', 'kn', 'sb', 'cl', 'bc', 'gv', 'wn', 'tn', 'rf', 'pv', 'ts', 'ss',
 ];
 
 export function knowledgePath(projectDir: string): string {
@@ -135,6 +135,17 @@ export function validateRecord(value: unknown, line: number): RecordValidationEr
         err(`'${k}' is only valid on kind 'behavior' — this record is '${String(rec.kn)}'`);
       }
     }
+  }
+
+  // `rf` (the source to consult) belongs to `source` and nowhere else, mirroring
+  // the given/when/then rule — it keeps "go read this" a distinct kind from the
+  // claims an agent must obey.
+  if (rec.kn === 'source') {
+    if (typeof rec.rf !== 'string' || rec.rf.trim().length === 0) {
+      err("'source' requires 'rf' (the document — a URL or repo-relative path)");
+    }
+  } else if (rec.rf !== undefined) {
+    err(`'rf' is only valid on kind 'source' — this record is '${String(rec.kn)}'`);
   }
 
   return errs;

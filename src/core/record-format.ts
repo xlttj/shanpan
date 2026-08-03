@@ -4,6 +4,8 @@ export interface ContextRecord {
   claim: string;
   because: string | null;
   provenance: string;
+  /** source only: the document to consult. Null for every other kind. */
+  ref?: string | null;
 }
 
 /**
@@ -15,9 +17,10 @@ const KIND_PRIORITY: Record<string, number> = {
   constraint: 1,
   rejected: 2,
   decision: 3,
-  behavior: 4,
-  intent: 5,
-  conflict: 6,
+  source: 4,
+  behavior: 5,
+  intent: 6,
+  conflict: 7,
 };
 
 /** Cap injected records so a well-documented file cannot flood the context. */
@@ -41,6 +44,11 @@ export function formatRecords(records: ContextRecord[], limit = MAX_INJECTED): s
   const shown = records.slice(0, limit);
   const lines = shown.map((r) => {
     const why = r.because ? ` — ${r.because}` : '';
+    // A source record's whole point is the pointer, so lead with it: the agent
+    // should go read the document, not treat the topic as a claim to obey.
+    if (r.kind === 'source' && r.ref) {
+      return `  • [source] ${r.claim} → consult ${r.ref}${why}  (${r.id}, ${r.provenance})`;
+    }
     return `  • [${r.kind}] ${r.claim}${why}  (${r.id}, ${r.provenance})`;
   });
   if (records.length > shown.length) {

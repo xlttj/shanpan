@@ -1,7 +1,7 @@
 import { Database, Connection, QueryResult } from '@ladybugdb/core';
 import path from 'node:path';
 import fs from 'node:fs';
-import { SCHEMA_STATEMENTS, SCHEMA_TABLE_NAMES, DROP_ORDER, LEGACY_TABLES } from './schema.js';
+import { SCHEMA_STATEMENTS, SCHEMA_TABLE_NAMES, SCHEMA_MIGRATIONS, DROP_ORDER, LEGACY_TABLES } from './schema.js';
 
 export const DB_DIR = '.specgraph';
 export const DB_FILE = 'graph.db';
@@ -62,6 +62,16 @@ export async function ensureSchema(conn: Connection): Promise<void> {
     if (await tableExists(conn, name)) continue;
     const result = await runQuery(conn, stmt);
     result.close();
+  }
+  // Bring an existing table up to the current column set. Idempotent: on a
+  // freshly-created table the column already exists and the ALTER throws.
+  for (const stmt of SCHEMA_MIGRATIONS) {
+    try {
+      const result = await runQuery(conn, stmt);
+      result.close();
+    } catch {
+      // column already present — nothing to do
+    }
   }
 }
 

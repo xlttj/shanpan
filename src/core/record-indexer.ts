@@ -76,6 +76,7 @@ export async function indexRecords(
         given: ${esc(r.gv ?? null)},
         when_: ${esc(r.wn ?? null)},
         then_: ${esc(r.tn ?? null)},
+        ref: ${esc(r.rf ?? null)},
         provenance: ${esc(r.pv)},
         provenance_kind: ${esc(provenanceKind(r.pv))},
         ts: ${escTs(r.ts)},

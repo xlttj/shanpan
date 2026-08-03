@@ -67,9 +67,14 @@ Kinds, in the order they should change your behaviour:
 | constraint | an invariant that must keep holding |
 | rejected | already tried, abandoned; do not re-propose |
 | decision | a settled choice and its reason; do not re-litigate |
+| source | a document to consult on a topic — go read it, do not treat it as a rule |
 | behavior | a given/when/then contract |
 | intent | why the thing exists at all |
 | conflict | sources disagree; needs a human to adjudicate |
+
+When you see a **source** record, it points at authoritative material (a URL or
+a local file) for a topic. Read the referenced document before working on that
+topic — it holds detail the record deliberately does not duplicate.
 
 Provenance tells you how much weight to give a claim:
 
@@ -120,6 +125,7 @@ not normally write the file directly, but you must be able to read it:
 | ts | UTC timestamp, YYYYMMDDHHIISS |
 | ss | supersedes — id of the record this replaces |
 | gv / wn / tn | given / when / then, behavior only |
+| rf | ref — the document to consult, source only |
 
 ## Choosing the kind
 
@@ -133,8 +139,32 @@ This is mechanical, not a judgement call:
   because a decision without its reason is worthless.
 - Something tried and abandoned? **rejected** — also needs "bc".
 - Why a module exists at all? **intent**.
+- Pointing at a document that covers a topic? **source** — see below.
 - Two sources disagree and you cannot resolve it? **conflict**. Do not pick a
   winner; record the disagreement and let a human settle it.
+
+## Source pointers — "for topic X, consult document Y"
+
+When you learn in a session that a topic is documented somewhere — a wiki page,
+an RFC, a local design doc — record it as a **source** so the next session finds
+it. You know all of this from the conversation, so capture it at the time.
+
+- **cl** = the topic (and what you will find there).
+- **rf** = the document: a URL, or a repo-relative path. Required. One source
+  per record — two documents are two records.
+- **sb** (optional but powerful) = the code the topic relates to. With it, the
+  pointer rides the same injection as code records: editing that code surfaces
+  "consult Y". Without it, the pointer is pure domain knowledge, found by search.
+- **pv** = usually "u" (the user told you) or "d:<path>" (you read it).
+
+Example: "on VAT rounding across the EU, consult docs/tax/vat.md, relates to
+src/tax/Vat.ts" →
+add_record kind=source claim="VAT rounding across the EU" ref="docs/tax/vat.md"
+subject="src/tax/Vat.ts" provenance=u
+
+A source pointer can rot — the document moves or dies. Same discipline as any
+record: when you find it moved, supersede it with the new location. specgraph
+never checks URLs and only softly flags a missing local file, so this is on you.
 
 ## Provenance discipline
 
