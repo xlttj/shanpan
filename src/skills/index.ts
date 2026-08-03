@@ -88,18 +88,18 @@ is stale, which is worth recording, or your change is wrong.
 
 ## After the work
 
-Record what you learned. See the "record-knowledge" skill.
+Record what you learned. See the "knowledge-record" skill.
 `,
 };
 
-const recordKnowledge: SkillDefinition = {
-  name: 'record-knowledge',
+const knowledgeRecord: SkillDefinition = {
+  name: 'knowledge-record',
   content: `---
-name: record-knowledge
+name: knowledge-record
 description: Write a knowledge record when you learn something durable — a trap, an invariant, a decision and its reason, or an approach that was tried and abandoned. Use after coding, after debugging, and when the user states a rule or preference in chat.
 ---
 
-# Record Knowledge
+# Knowledge Record
 
 Append a record whenever something durable is learned. Use the "add_record" MCP
 tool, then call "reindex" so it becomes queryable.
@@ -204,14 +204,14 @@ to nothing shows up as drift — check the ID with "search_symbols" if unsure.
 `,
 };
 
-const checkKnowledge: SkillDefinition = {
-  name: 'check-knowledge',
+const knowledgeCheck: SkillDefinition = {
+  name: 'knowledge-check',
   content: `---
-name: check-knowledge
+name: knowledge-check
 description: Check whether knowledge records still match the code. Use after renaming, moving, or deleting code, and before finishing a session.
 ---
 
-# Check Knowledge
+# Knowledge Check
 
 ## Two kinds of drift
 
@@ -251,7 +251,7 @@ updated from a file that does not parse.
 2. Ask whether any record you read this session is now false — that is soft
    drift, and it is invisible to the tool.
 3. Ask whether anything learned this session is unrecorded. See the
-   "record-knowledge" skill.
+   "knowledge-record" skill.
 `,
 };
 
@@ -330,12 +330,12 @@ The scanner sets provenance for you: n:file:line for markers, g:sha for reverts,
 d:path for docs. When YOU add records from judgment, set it just as honestly —
 "d:" for something you read, "u:" for something the user stated, and "i:" only
 when you inferred it with no source. Never invent a reason to fill a gap. See the
-record-knowledge skill for the discipline.
+knowledge-record skill for the discipline.
 
 ## This runs once
 
 Bootstrap seeds a base. It is not how the knowledge base stays current — that is
-the per-task loop in knowledge-lookup and record-knowledge. Bootstrap is
+the per-task loop in knowledge-lookup and knowledge-record. Bootstrap is
 deliberately partial; say so to the user when you finish, and point them at the
 ongoing loop.
 `,
@@ -343,7 +343,7 @@ ongoing loop.
 
 export const SKILLS: SkillDefinition[] = [
   knowledgeLookup,
-  recordKnowledge,
-  checkKnowledge,
+  knowledgeRecord,
+  knowledgeCheck,
   knowledgeBootstrap,
 ];

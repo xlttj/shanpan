@@ -22,7 +22,8 @@ program
 program
   .command('init')
   .description('Initialize .specgraph/ in the current project')
-  .action(() => runInit());
+  .option('--no-git-hooks', 'Do not install git hooks (checkout/merge rebuild, pre-commit check)')
+  .action((opts) => runInit({ gitHooks: opts.gitHooks as boolean }));
 
 program
   .command('query <cypher>')
@@ -62,7 +63,8 @@ program
   .command('upgrade')
   .description('Re-write agent skill files to the current version')
   .option('--hooks', 'Also update IDE hook settings')
-  .action((opts) => runUpgrade({ hooks: !!opts.hooks }));
+  .option('--no-git-hooks', 'Do not (re)install git hooks')
+  .action((opts) => runUpgrade({ hooks: !!opts.hooks, gitHooks: opts.gitHooks as boolean }));
 
 program
   .command('check')

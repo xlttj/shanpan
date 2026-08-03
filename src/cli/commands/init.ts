@@ -7,6 +7,7 @@ import { saveConfig, RC_FILE } from '../../core/config.js';
 import { DEFAULT_CONFIG } from '../../types/config.js';
 import { SKILLS } from '../../skills/index.js';
 import { IDE_INTEGRATIONS, installIdeHooks, installOpenCodePlugin, type IdeIntegration } from '../../core/ide-hooks.js';
+import { installGitHooks } from '../../core/git-hooks.js';
 
 const SKILL_CLIENT_DIRS = ['.claude', '.cursor', '.opencode'] as const;
 
@@ -98,7 +99,7 @@ export async function promptIdeSelection(projectDir: string): Promise<IdeIntegra
   });
 }
 
-export async function runInit(): Promise<void> {
+export async function runInit(options: { gitHooks?: boolean } = {}): Promise<void> {
   const projectDir = process.cwd();
   const dbPath = getDbPath(projectDir);
 
@@ -148,12 +149,23 @@ export async function runInit(): Promise<void> {
     console.log(chalk.gray('  Skipped agent hooks. To add later, configure your IDE settings manually.'));
   }
 
+  if (options.gitHooks !== false) {
+    const hooks = installGitHooks(projectDir);
+    if (hooks === null) {
+      console.log(chalk.gray('  Not a git repository — skipped git hooks.'));
+    } else {
+      console.log(
+        chalk.green(`✓ Installed git hooks (${hooks.join(', ')})`) +
+          chalk.gray(' — rebuilds the graph on checkout/merge, checks integrity pre-commit'),
+      );
+    }
+  }
+
   console.log('');
   console.log(chalk.gray('Next steps:'));
-  console.log(chalk.gray('  1. Add spec files (*.md) to the specs/ directory'));
-  console.log(chalk.gray('  2. Run `specgraph index` to build the graph'));
-  console.log(chalk.gray('  3. Run `specgraph analyze` to scan source code'));
-  console.log(chalk.gray('  4. Run `specgraph status` to inspect the graph'));
+  console.log(chalk.gray('  1. Run `specgraph analyze` to index code symbols'));
+  console.log(chalk.gray('  2. Run `specgraph bootstrap` to seed records from history (optional)'));
+  console.log(chalk.gray('  3. Run `specgraph status` to inspect the graph'));
   console.log('');
   console.log(chalk.gray('To start the MCP server: specgraph mcp --project-dir <path>'));
 }

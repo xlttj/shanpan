@@ -1,9 +1,10 @@
 import chalk from 'chalk';
 import { dbExists } from '../../core/db.js';
 import { installIdeHooks, installOpenCodePlugin } from '../../core/ide-hooks.js';
+import { installGitHooks } from '../../core/git-hooks.js';
 import { writeSkills, promptIdeSelection } from './init.js';
 
-export async function runUpgrade(options: { hooks?: boolean }): Promise<void> {
+export async function runUpgrade(options: { hooks?: boolean; gitHooks?: boolean }): Promise<void> {
   const projectDir = process.cwd();
 
   if (!dbExists(projectDir)) {
@@ -16,6 +17,13 @@ export async function runUpgrade(options: { hooks?: boolean }): Promise<void> {
   console.log('');
   for (const dir of skillDirs) {
     console.log(chalk.green(`✓ Updated agent skills in ${dir}/`));
+  }
+
+  if (options.gitHooks !== false) {
+    const gitHooks = installGitHooks(projectDir);
+    if (gitHooks !== null) {
+      console.log(chalk.green(`✓ Updated git hooks (${gitHooks.join(', ')})`));
+    }
   }
 
   if (options.hooks) {

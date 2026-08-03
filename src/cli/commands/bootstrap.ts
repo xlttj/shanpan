@@ -256,5 +256,5 @@ function printGap(): void {
   console.log(chalk.gray('  · the reasoning behind decisions that live only in code'));
   console.log(chalk.gray('  · behaviour contracts (write these from tests as you touch them)'));
   console.log(chalk.gray('  · anything the team knows but never wrote down'));
-  console.log(chalk.gray('The base fills in as agents work — see the record-knowledge skill.'));
+  console.log(chalk.gray('The base fills in as agents work — see the knowledge-record skill.'));
 }
