@@ -6,6 +6,7 @@ import {
   MAX_INJECTED,
   type ContextRecord,
 } from '../../core/record-format.js';
+import { ancestorDirs, dirDepth } from '../../core/dir-scope.js';
 
 // Re-exported so the hook's formatting contract stays addressable from here.
 export { formatRecords, sortRecords, MAX_INJECTED, type ContextRecord };
@@ -56,33 +57,52 @@ async function fetchRecords(
 ): Promise<ContextRecord[]> {
   const byId = new Map<string, ContextRecord>();
 
+  const RET = `r.id AS id, r.kind AS kind, r.claim AS claim,
+              r.because AS because, r.provenance AS provenance, r.ref AS ref`;
+
+  const take = (row: Record<string, unknown>, over: Partial<ContextRecord> = {}): void => {
+    const id = String(row['id']);
+    if (byId.has(id)) return; // most-specific match wins — symbol/file queries run first
+    byId.set(id, {
+      id,
+      kind: String(row['kind']),
+      claim: String(row['claim']),
+      because: row['because'] == null ? null : String(row['because']),
+      provenance: String(row['provenance']),
+      ref: row['ref'] == null ? null : String(row['ref']),
+      ...over,
+    });
+  };
+
   for (const relPath of relPaths) {
     const esc = escId(relPath);
     // DISTINCT matters: a record with several subjects in the same file would
     // otherwise come back once per matching edge.
-    const queries = [
+    for (const cypher of [
       `MATCH (r:Record)-[:ABOUT]->(c:CodeSymbol {file_path: '${esc}'})
-       WHERE r.live
-       RETURN DISTINCT r.id AS id, r.kind AS kind, r.claim AS claim,
-                       r.because AS because, r.provenance AS provenance, r.ref AS ref`,
+       WHERE r.live RETURN DISTINCT ${RET}`,
       `MATCH (r:Record)-[:ABOUT]->(f:File {id: '${esc}'})
-       WHERE r.live
-       RETURN DISTINCT r.id AS id, r.kind AS kind, r.claim AS claim,
-                       r.because AS because, r.provenance AS provenance, r.ref AS ref`,
-    ];
-    for (const cypher of queries) {
+       WHERE r.live RETURN DISTINCT ${RET}`,
+    ]) {
       const { rows } = await queryAll(conn, cypher);
+      for (const row of rows) take(row);
+    }
+
+    // Directory-anchored records: a record on any ancestor directory applies to
+    // this file (recursive subtree). Deeper directories are more specific, so a
+    // module-wide rule ranks below the file's own records but is still surfaced.
+    const dirs = ancestorDirs(relPath);
+    if (dirs.length > 0) {
+      const list = dirs.map((d) => `'${escId(d)}'`).join(', ');
+      const { rows } = await queryAll(
+        conn,
+        `MATCH (r:Record)-[:ABOUT]->(d:File)
+         WHERE r.live AND d.kind = 'dir' AND d.id IN [${list}]
+         RETURN DISTINCT ${RET}, d.id AS anchorDir`,
+      );
       for (const row of rows) {
-        const id = String(row['id']);
-        if (byId.has(id)) continue;
-        byId.set(id, {
-          id,
-          kind: String(row['kind']),
-          claim: String(row['claim']),
-          because: row['because'] == null ? null : String(row['because']),
-          provenance: String(row['provenance']),
-          ref: row['ref'] == null ? null : String(row['ref']),
-        });
+        const anchorDir = String(row['anchorDir']);
+        take(row, { anchorDir, scope: 100 - dirDepth(anchorDir) });
       }
     }
   }

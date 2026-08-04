@@ -16,6 +16,8 @@ const FILE_PREFIX = 'specgraph-';
 
 export interface FileRecords {
   file: string;
+  /** True when `file` is a directory anchor — the rule then globs its subtree. */
+  isDir: boolean;
   records: ContextRecord[];
 }
 
@@ -31,44 +33,45 @@ function toRecord(row: Record<string, unknown>): ContextRecord {
 }
 
 /**
- * Group every live record by the file its subjects live in. DISTINCT is
- * required: a record naming several symbols in one file yields one row per
- * ABOUT edge, and the per-file Map then collapses the two queries.
+ * Group every live record by the file (or directory) its subjects live in.
+ * DISTINCT is required: a record naming several symbols in one file yields one
+ * row per ABOUT edge, and the per-file Map then collapses the two queries. A
+ * directory subject (File node with kind 'dir') becomes a subtree-globbed rule.
  */
 export async function fetchRecordsByFile(conn: Connection): Promise<FileRecords[]> {
   const queries = [
     `MATCH (r:Record)-[:ABOUT]->(c:CodeSymbol)
      WHERE r.live
-     RETURN DISTINCT c.file_path AS file, r.id AS id, r.kind AS kind,
+     RETURN DISTINCT c.file_path AS file, 'source' AS fileKind, r.id AS id, r.kind AS kind,
                      r.claim AS claim, r.because AS because, r.provenance AS provenance, r.ref AS ref`,
     `MATCH (r:Record)-[:ABOUT]->(f:File)
      WHERE r.live
-     RETURN DISTINCT f.id AS file, r.id AS id, r.kind AS kind,
+     RETURN DISTINCT f.id AS file, f.kind AS fileKind, r.id AS id, r.kind AS kind,
                      r.claim AS claim, r.because AS because, r.provenance AS provenance, r.ref AS ref`,
   ];
 
-  const byFile = new Map<string, Map<string, ContextRecord>>();
+  const byFile = new Map<string, { isDir: boolean; records: Map<string, ContextRecord> }>();
   for (const cypher of queries) {
     const { rows } = await queryAll(conn, cypher);
     for (const row of rows) {
       const file = String(row['file']);
       if (!file || file === 'null') continue;
-      let records = byFile.get(file);
-      if (!records) {
-        records = new Map();
-        byFile.set(file, records);
+      let group = byFile.get(file);
+      if (!group) {
+        group = { isDir: String(row['fileKind']) === 'dir', records: new Map() };
+        byFile.set(file, group);
       }
       const record = toRecord(row);
-      if (!records.has(record.id)) records.set(record.id, record);
+      if (!group.records.has(record.id)) group.records.set(record.id, record);
     }
   }
 
   return [...byFile.entries()]
-    .map(([file, records]) => ({ file, records: sortRecords([...records.values()]) }))
+    .map(([file, g]) => ({ file, isDir: g.isDir, records: sortRecords([...g.records.values()]) }))
     .sort((a, b) => a.file.localeCompare(b.file));
 }
 
-/** Stable, collision-free filename for a rule describing one source file. */
+/** Stable, collision-free filename for a rule describing one file or module. */
 export function ruleFileName(file: string): string {
   const slug = file.replace(/[^a-zA-Z0-9]+/g, '-').replace(/^-+|-+$/g, '');
   return `${FILE_PREFIX}${slug}.mdc`;
@@ -76,18 +79,22 @@ export function ruleFileName(file: string): string {
 
 /**
  * A rule with globs set and alwaysApply false is auto-attached by Cursor when a
- * matching file is in context. That is the only documented Cursor mechanism for
- * file-scoped knowledge, since no Cursor hook can inject context before an edit.
+ * matching file is in context — the only documented Cursor mechanism for
+ * scoped knowledge, since no Cursor hook can inject context before an edit. A
+ * directory anchor globs the whole subtree, so a module rule attaches to every
+ * file beneath it.
  */
-export function renderRule(file: string, records: ContextRecord[]): string {
+export function renderRule(file: string, records: ContextRecord[], isDir = false): string {
+  const glob = isDir ? `${file}/**` : file;
+  const heading = isDir ? `Known about module ${file}` : `Known about ${file}`;
   return [
     '---',
     `description: Knowledge records for ${file}`,
-    `globs: ${file}`,
+    `globs: ${glob}`,
     'alwaysApply: false',
     '---',
     '',
-    `# Known about ${file}`,
+    `# ${heading}`,
     '',
     ...formatRecords(records, Infinity),
     '',
@@ -135,7 +142,11 @@ export function writeRules(projectDir: string, groups: FileRecords[]): WriteRule
   for (const group of groups) {
     const name = ruleFileName(group.file);
     names.add(name);
-    fs.writeFileSync(path.join(rulesDir, name), renderRule(group.file, group.records), 'utf-8');
+    fs.writeFileSync(
+      path.join(rulesDir, name),
+      renderRule(group.file, group.records, group.isDir),
+      'utf-8',
+    );
     written.push(name);
   }
 

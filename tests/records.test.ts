@@ -504,6 +504,100 @@ describe('record MCP handlers', () => {
   });
 });
 
+// ─── directory-anchored records ──────────────────────────────────────────────
+
+describe('directory anchoring', () => {
+  let dbDir: string;
+
+  beforeEach(async () => {
+    dbDir = fs.mkdtempSync(path.join(os.tmpdir(), 'specgraph-diranchor-'));
+    fs.mkdirSync(path.join(dbDir, '.specgraph'), { recursive: true });
+    // A real module subtree the fallback can resolve, plus a sibling with a
+    // shared prefix to prove segment-boundary matching.
+    fs.mkdirSync(path.join(dbDir, 'apps/bmf/src/Consumers'), { recursive: true });
+    fs.mkdirSync(path.join(dbDir, 'apps/bmfx/src'), { recursive: true });
+    const { db, conn } = await openDatabase(dbDir);
+    await dropAndRecreateSchema(conn);
+    // A concrete symbol living inside the module, so the file resolves too.
+    const r = await conn.query(
+      `CREATE (:CodeSymbol { id: 'apps/bmf/src/Consumers/Foo.php::Foo', fqn: 'Foo', symbol_type: 'class', file_path: 'apps/bmf/src/Consumers/Foo.php', line_start: 0, line_end: 0, language: 'php' })`,
+    );
+    if (!Array.isArray(r)) r.close();
+    await closeDatabase(db, conn);
+  });
+
+  afterEach(() => {
+    fs.rmSync(dbDir, { recursive: true, force: true });
+  });
+
+  function parsed(res: { content: { type: string; text: string }[] }): any {
+    return JSON.parse(res.content[0]!.text);
+  }
+
+  it('resolves a directory subject to a File node with kind dir, no drift', async () => {
+    const recs = [rec({ id: 'aaa111', kn: 'constraint', cl: 'all consumers idempotent', sb: ['apps/bmf/src'] })];
+    appendRecords(dbDir, recs);
+    const { db, conn } = await openDatabase(dbDir);
+    try {
+      const stats = await indexRecords(conn, recs, dbDir);
+      expect(stats.unresolved).toEqual([]);
+      const { rows } = await queryAll(conn, "MATCH (f:File {id: 'apps/bmf/src'}) RETURN f.kind AS kind");
+      expect(rows[0]?.['kind']).toBe('dir');
+    } finally {
+      await closeDatabase(db, conn);
+    }
+  });
+
+  it('surfaces a module rule for a file deep in the subtree', async () => {
+    const recs = [rec({ id: 'aaa111', kn: 'constraint', cl: 'all consumers idempotent', sb: ['apps/bmf/src'] })];
+    appendRecords(dbDir, recs);
+    const { db, conn } = await openDatabase(dbDir);
+    try {
+      await indexRecords(conn, recs, dbDir);
+    } finally {
+      await closeDatabase(db, conn);
+    }
+    const { handleGetRecordsForSymbol } = await import('../src/cli/commands/mcp.js');
+    const out = parsed(await handleGetRecordsForSymbol(dbDir, 'apps/bmf/src/Consumers/Foo.php'));
+    expect(out.map((r: { id: string }) => r.id)).toContain('aaa111');
+  });
+
+  it('does not leak a module rule to a sibling with a shared path prefix', async () => {
+    const recs = [rec({ id: 'aaa111', kn: 'constraint', cl: 'bmf rule', sb: ['apps/bmf/src'] })];
+    appendRecords(dbDir, recs);
+    const { db, conn } = await openDatabase(dbDir);
+    try {
+      await indexRecords(conn, recs, dbDir);
+    } finally {
+      await closeDatabase(db, conn);
+    }
+    const { handleGetRecordsForSymbol } = await import('../src/cli/commands/mcp.js');
+    // apps/bmfx/... must NOT match apps/bmf as an ancestor.
+    const out = parsed(await handleGetRecordsForSymbol(dbDir, 'apps/bmfx/src/Bar.php'));
+    expect(out.map((r: { id: string }) => r.id)).not.toContain('aaa111');
+  });
+
+  it('emits a subtree glob for a directory-anchored Cursor rule', async () => {
+    const recs = [rec({ id: 'aaa111', kn: 'constraint', cl: 'module rule', sb: ['apps/bmf/src'] })];
+    appendRecords(dbDir, recs);
+    const { db, conn } = await openDatabase(dbDir);
+    let groups;
+    try {
+      await indexRecords(conn, recs, dbDir);
+      const { fetchRecordsByFile } = await import('../src/core/cursor-rules.js');
+      groups = await fetchRecordsByFile(conn);
+    } finally {
+      await closeDatabase(db, conn);
+    }
+    const { renderRule } = await import('../src/core/cursor-rules.js');
+    const dirGroup = groups.find((g) => g.file === 'apps/bmf/src');
+    expect(dirGroup?.isDir).toBe(true);
+    const rule = renderRule(dirGroup!.file, dirGroup!.records, dirGroup!.isDir);
+    expect(rule).toContain('globs: apps/bmf/src/**');
+    expect(rule).toContain('# Known about module apps/bmf/src');
+  });
+});
+
 // ─── stale-graph diagnostics (agent-feedback fixes) ──────────────────────────
 
 describe('stale-graph diagnostics', () => {

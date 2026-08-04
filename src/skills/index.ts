@@ -231,6 +231,26 @@ it, do so before ending the session.
 
 Record subjects must be real symbol IDs or file paths. A subject that resolves
 to nothing shows up as drift — check the ID with "search_symbols" if unsure.
+
+## Anchoring: symbol, file, or directory
+
+A subject can be a symbol ("src/a.ts::Foo.bar"), a file ("src/a.ts"), or a
+**directory** ("apps/bmf/src"). A directory anchor applies to that directory and
+everything beneath it, recursively — so editing any file in the subtree surfaces
+the record.
+
+**Choose the most specific anchor that is still true.** A trap in one function
+anchors at the symbol. A rule for one file anchors at the file. Anchor at a
+directory only for a rule that genuinely spans the whole module — "every
+consumer in this directory must be idempotent", not "this one class does X".
+
+Two cautions:
+- **Do not anchor above the module.** A subject like "apps" or "src" injects for
+  every edit in a huge tree — noise that trains agents to ignore records. Anchor
+  at the bounded-context / module root, not the repo root.
+- **A directory anchor has weaker drift protection.** The directory keeps
+  existing even when its meaningful contents move, so a module rule rots more
+  quietly than a symbol-anchored one. Revisit module anchors deliberately.
 `,
 };
 
@@ -361,6 +381,20 @@ d:path for docs. When YOU add records from judgment, set it just as honestly —
 "d:" for something you read, "u:" for something the user stated, and "i:" only
 when you inferred it with no source. Never invent a reason to fill a gap. See the
 knowledge-record skill for the discipline.
+
+Two mistakes are easy to make in bulk here: setting "t:" (a test file) on a
+document that is not a test — a migrated spec or ADR is "d:", not "t:" — and
+guessing a rationale the source does not state. Both compound across a big
+bootstrap. Slow down on provenance.
+
+## Anchor module rules at the module, not a stand-in file
+
+Much bootstrapped knowledge is module-wide ("this bounded context does X"). Do
+not pin such a rule to one representative class — anchor it at the module
+directory (e.g. "apps/bmf/src/Infrastructure/Consumers"), which applies to the
+whole subtree and surfaces for every file in it. Anchor at a concrete symbol or
+file when the rule is that local, and never above the module root. See the
+knowledge-record skill's anchoring section.
 
 ## This runs once
 

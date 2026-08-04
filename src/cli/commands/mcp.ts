@@ -17,6 +17,7 @@ import {
   validateRecord,
 } from '../../core/records.js';
 import { indexRecords } from '../../core/record-indexer.js';
+import { ancestorDirs } from '../../core/dir-scope.js';
 import { RECORD_KINDS, type KnowledgeRecord, type RecordKind } from '../../types/record.js';
 
 const MUTATING_KEYWORDS = /^\s*(CREATE|MERGE|SET|DELETE|REMOVE|DROP|ALTER|CALL)\b/i;
@@ -343,6 +344,21 @@ export async function handleGetRecordsForSymbol(
         `MATCH (r:Record)-[:ABOUT]->(c:CodeSymbol)
          WHERE c.file_path = '${escId(filePath)}' ${liveFilter}
          RETURN DISTINCT ${RECORD_RETURN}, c.id AS subject`,
+      );
+      for (const row of rows) byId.set(String(row['id']), row);
+    }
+
+    // Directory-anchored records covering the file's module subtree. Without
+    // this, an OpenCode agent (which has no pre-edit injection and relies on
+    // this tool) would never see module-wide rules.
+    const dirs = ancestorDirs(filePath);
+    if (dirs.length > 0) {
+      const list = dirs.map((d) => `'${escId(d)}'`).join(', ');
+      const { rows } = await queryAll(
+        conn,
+        `MATCH (r:Record)-[:ABOUT]->(d:File)
+         WHERE d.kind = 'dir' AND d.id IN [${list}] ${liveFilter}
+         RETURN DISTINCT ${RECORD_RETURN}, d.id AS subject`,
       );
       for (const row of rows) byId.set(String(row['id']), row);
     }

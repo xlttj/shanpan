@@ -95,19 +95,31 @@ export async function indexRecords(
           ? 'File'
           : null;
 
-      // A subject may name a real file the analyser never walked — a manifest,
-      // a config, a migration. Indexing it is not stubbing: the file exists, so
-      // drift still fires the moment it is deleted.
+      // A subject may name a real file or directory the analyser never walked —
+      // a manifest, a config, or a whole module (apps/bmf/src). Indexing it is
+      // not stubbing: it exists, so drift still fires the moment it is removed.
+      // A directory is stored as a File node with kind 'dir'; records anchored
+      // there apply to the whole subtree (see dir-scope ancestor matching).
       if (label === null && projectDir && !subject.includes('::')) {
         const abs = path.resolve(projectDir, subject);
-        if (abs.startsWith(projectDir) && fs.existsSync(abs) && fs.statSync(abs).isFile()) {
-          const ext = path.extname(subject).toLowerCase();
-          await run(
-            conn,
-            `CREATE (:File {id: ${esc(subject)}, path: ${esc(subject)}, ext: ${esc(ext)}, kind: 'other'})`,
-          );
-          knownFiles.add(subject);
-          label = 'File';
+        if (abs.startsWith(projectDir) && fs.existsSync(abs)) {
+          const stat = fs.statSync(abs);
+          if (stat.isDirectory()) {
+            await run(
+              conn,
+              `CREATE (:File {id: ${esc(subject)}, path: ${esc(subject)}, ext: '', kind: 'dir'})`,
+            );
+            knownFiles.add(subject);
+            label = 'File';
+          } else if (stat.isFile()) {
+            const ext = path.extname(subject).toLowerCase();
+            await run(
+              conn,
+              `CREATE (:File {id: ${esc(subject)}, path: ${esc(subject)}, ext: ${esc(ext)}, kind: 'other'})`,
+            );
+            knownFiles.add(subject);
+            label = 'File';
+          }
         }
       }
 

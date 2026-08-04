@@ -70,6 +70,22 @@ describe('record injection', () => {
     expect(sorted.map((x) => x.id)).toEqual(['aa', 'mm', 'zz']);
   });
 
+  it('ranks a file-specific record above a module-wide one of the same kind', async () => {
+    const { sortRecords } = await import('../src/cli/commands/context.js');
+    const fileRec = { ...r('aa', 'constraint'), scope: 0 };
+    const dirRec = { ...r('bb', 'constraint'), scope: 97, anchorDir: 'apps/bmf/src' };
+    const sorted = sortRecords([dirRec, fileRec]);
+    expect(sorted.map((x) => x.id)).toEqual(['aa', 'bb']);
+  });
+
+  it('renders a module-anchored record with its directory tag', async () => {
+    const { formatRecords } = await import('../src/cli/commands/context.js');
+    const lines = formatRecords([
+      { ...r('ab12cd', 'constraint', { claim: 'idempotent consumers' }), anchorDir: 'apps/bmf/src' },
+    ]);
+    expect(lines[0]).toBe('  • [constraint] idempotent consumers [module: apps/bmf/src]  (ab12cd, a)');
+  });
+
   it('sorts unknown kinds last rather than dropping them', async () => {
     const { sortRecords } = await import('../src/cli/commands/context.js');
     const sorted = sortRecords([r('aa', 'future_kind'), r('bb', 'intent')]);
