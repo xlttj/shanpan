@@ -72,6 +72,16 @@ describe('MCP tool list', () => {
       expect(mcpSrc).toContain(`name: '${tool}'`);
     }
   });
+
+  it('awaits every delegated handler, so the dispatch try/catch wraps its errors', () => {
+    // `return handleX(...)` returns an unawaited promise; a rejection then
+    // escapes the dispatch try/catch and reaches the agent as a raw -32603
+    // instead of a diagnosed message. `return await handleX(...)` keeps it
+    // inside the guard. This asserts none regressed to the unawaited form.
+    const mcpSrc = fs.readFileSync(path.resolve('src/cli/commands/mcp.ts'), 'utf-8');
+    const unawaited = [...mcpSrc.matchAll(/return (handle\w+)\(/g)].map((m) => m[1]);
+    expect(unawaited, `unawaited delegated returns bypass diagnoseError: ${unawaited.join(', ')}`).toEqual([]);
+  });
 });
 
 // ─── get_undocumented_symbols logic ──────────────────────────────────────────

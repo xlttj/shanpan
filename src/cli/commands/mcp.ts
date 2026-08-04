@@ -801,33 +801,33 @@ export async function runMcp(options: { projectDir?: string } = {}): Promise<voi
 
 
     if (name === 'get_callers') {
-      return handleGetCallers(projectDir, String(a['symbolId'] ?? ''));
+      return await handleGetCallers(projectDir, String(a['symbolId'] ?? ''));
     }
 
     if (name === 'get_callees') {
-      return handleGetCallees(projectDir, String(a['symbolId'] ?? ''));
+      return await handleGetCallees(projectDir, String(a['symbolId'] ?? ''));
     }
 
     if (name === 'get_impact') {
       const maxDepth = typeof a['maxDepth'] === 'number' ? (a['maxDepth'] as number) : 3;
-      return handleGetImpact(projectDir, String(a['symbolId'] ?? ''), maxDepth);
+      return await handleGetImpact(projectDir, String(a['symbolId'] ?? ''), maxDepth);
     }
 
     if (name === 'get_callers_transitive') {
       const maxDepth = typeof a['maxDepth'] === 'number' ? (a['maxDepth'] as number) : 3;
-      return handleGetCallersTransitive(projectDir, String(a['symbolId'] ?? ''), maxDepth);
+      return await handleGetCallersTransitive(projectDir, String(a['symbolId'] ?? ''), maxDepth);
     }
 
     if (name === 'search_symbols') {
       const limit = typeof a['limit'] === 'number' ? (a['limit'] as number) : 20;
       const kind = typeof a['kind'] === 'string' ? (a['kind'] as string) : undefined;
-      return handleSearchSymbols(projectDir, String(a['query'] ?? ''), limit, kind);
+      return await handleSearchSymbols(projectDir, String(a['query'] ?? ''), limit, kind);
     }
 
 
 
     if (name === 'get_records_for_symbol') {
-      return handleGetRecordsForSymbol(
+      return await handleGetRecordsForSymbol(
         projectDir,
         String(a['symbolId'] ?? ''),
         a['includeSuperseded'] === true,
@@ -837,23 +837,23 @@ export async function runMcp(options: { projectDir?: string } = {}): Promise<voi
     if (name === 'search_records') {
       const limit = typeof a['limit'] === 'number' ? (a['limit'] as number) : 20;
       const kind = typeof a['kind'] === 'string' ? (a['kind'] as string) : undefined;
-      return handleSearchRecords(projectDir, String(a['query'] ?? ''), limit, kind);
+      return await handleSearchRecords(projectDir, String(a['query'] ?? ''), limit, kind);
     }
 
     if (name === 'get_records_by_kind') {
-      return handleGetRecordsByKind(projectDir, String(a['kind'] ?? ''));
+      return await handleGetRecordsByKind(projectDir, String(a['kind'] ?? ''));
     }
 
     if (name === 'get_records_by_ref') {
-      return handleGetRecordsByRef(projectDir, String(a['ref'] ?? ''));
+      return await handleGetRecordsByRef(projectDir, String(a['ref'] ?? ''));
     }
 
     if (name === 'get_record_drift') {
-      return handleGetRecordDrift(projectDir);
+      return await handleGetRecordDrift(projectDir);
     }
 
     if (name === 'add_record') {
-      return handleAddRecord(projectDir, {
+      return await handleAddRecord(projectDir, {
         kind: String(a['kind'] ?? ''),
         claim: String(a['claim'] ?? ''),
         because: typeof a['because'] === 'string' ? a['because'] : undefined,
