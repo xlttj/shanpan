@@ -8,6 +8,7 @@ import {
   formatTs,
   nextId,
   validateRecord,
+  missingProvenanceRefs,
   knowledgePath,
 } from '../../core/records.js';
 import type { KnowledgeRecord, RecordKind } from '../../types/record.js';
@@ -133,6 +134,18 @@ export async function runRecordsAdd(opts: RecordsAddOptions): Promise<void> {
 
   if (opts.supersedes && !taken.has(opts.supersedes)) {
     console.error(chalk.red(`Cannot supersede '${opts.supersedes}' — no such record.`));
+    process.exitCode = 1;
+    return;
+  }
+
+  const missing = missingProvenanceRefs(rec, projectDir);
+  if (missing.length > 0) {
+    console.error(chalk.red(`Provenance cites a file that does not exist: ${missing.join(', ')}`));
+    console.error(
+      chalk.gray(
+        "  A d:/t:/n: pointer must name a real file you read. If the claim is your own inference, use provenance 'i'.",
+      ),
+    );
     process.exitCode = 1;
     return;
   }

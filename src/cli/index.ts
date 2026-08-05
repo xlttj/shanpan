@@ -159,9 +159,13 @@ records
 // order after the command completes. Without this, the simultaneous presence
 // of multiple native addons (tree-sitter, LadybugDB) causes a segfault on
 // macOS because their native destructors execute in the wrong sequence.
+//
+// Exit with whatever code a command set via process.exitCode — forcing 0 here
+// swallows the non-zero exits that `check` (invalid/fabricated records) and a
+// rejected `records add` rely on for CI and pre-commit to actually fail.
 program
   .parseAsync(process.argv)
-  .then(() => process.exit(0))
+  .then(() => process.exit(process.exitCode ?? 0))
   .catch((err: Error) => {
     console.error(err.message);
     process.exit(1);

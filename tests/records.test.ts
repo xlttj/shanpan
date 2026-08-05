@@ -13,6 +13,8 @@ import {
   appendRecords,
   liveIds,
   knowledgePath,
+  provenancePointers,
+  missingProvenanceRefs,
 } from '../src/core/records.js';
 import { indexRecords, provenanceKind } from '../src/core/record-indexer.js';
 import { openDatabase, closeDatabase, queryAll, dropAndRecreateSchema } from '../src/core/db.js';
@@ -306,6 +308,47 @@ describe('provenanceKind', () => {
   });
 });
 
+describe('provenancePointers', () => {
+  it('yields nothing for bare tokens that carry no file', () => {
+    expect(provenancePointers('u')).toEqual([]);
+    expect(provenancePointers('a')).toEqual([]);
+    expect(provenancePointers('i')).toEqual([]);
+  });
+  it('yields the file for d: (doc) and t: (test)', () => {
+    expect(provenancePointers('d:docs/adr/0001.md')).toEqual(['docs/adr/0001.md']);
+    expect(provenancePointers('t:tests/foo.test.ts')).toEqual(['tests/foo.test.ts']);
+  });
+  it('strips the trailing :line from an n: code location', () => {
+    expect(provenancePointers('n:src/a.php:42')).toEqual(['src/a.php']);
+    expect(provenancePointers('n:src/a.php')).toEqual(['src/a.php']);
+  });
+  it('yields nothing for g: — a git sha is not a path', () => {
+    expect(provenancePointers('g:abc123f')).toEqual([]);
+  });
+});
+
+describe('missingProvenanceRefs', () => {
+  it('flags a d:/t:/n: pointer whose file is not on disk', () => {
+    const r = rec({ pv: 'd:openspec/design-that-was-invented.md' });
+    expect(missingProvenanceRefs(r, tmpDir)).toEqual(['openspec/design-that-was-invented.md']);
+  });
+  it('passes when the cited file exists', () => {
+    fs.mkdirSync(path.join(tmpDir, 'docs'), { recursive: true });
+    fs.writeFileSync(path.join(tmpDir, 'docs/real.md'), '# real');
+    expect(missingProvenanceRefs(rec({ pv: 'd:docs/real.md' }), tmpDir)).toEqual([]);
+  });
+  it('never flags a bare token or a git sha', () => {
+    expect(missingProvenanceRefs(rec({ pv: 'i' }), tmpDir)).toEqual([]);
+    expect(missingProvenanceRefs(rec({ pv: 'g:deadbeef' }), tmpDir)).toEqual([]);
+  });
+  it('checks the path portion of an n: pointer, ignoring the line number', () => {
+    fs.mkdirSync(path.join(tmpDir, 'src'), { recursive: true });
+    fs.writeFileSync(path.join(tmpDir, 'src/a.ts'), 'export const x = 1;');
+    expect(missingProvenanceRefs(rec({ pv: 'n:src/a.ts:999' }), tmpDir)).toEqual([]);
+    expect(missingProvenanceRefs(rec({ pv: 'n:src/gone.ts:1' }), tmpDir)).toEqual(['src/gone.ts']);
+  });
+});
+
 // ─── MCP handlers ────────────────────────────────────────────────────────────
 
 describe('record MCP handlers', () => {
@@ -501,6 +544,47 @@ describe('record MCP handlers', () => {
     expect(refs).not.toContain('https://example.com/x'); // URLs are never checked
     // A missing document is soft — it must not surface as hard subject drift.
     expect(out.unresolved.map((u: { recordId: string }) => u.recordId)).not.toContain('sss777');
+  });
+
+  it('rejects add_record when provenance cites a file that does not exist', async () => {
+    const { handleAddRecord } = await import('../src/cli/commands/mcp.js');
+    const res = await handleAddRecord(dbDir, {
+      kind: 'decision',
+      claim: 'guessed from a design doc that was never read',
+      provenance: 'd:openspec/2025-11-invented.md',
+    });
+    expect(res.content[0]!.text).toContain('does not exist');
+    // The fabricated claim must not reach disk.
+    const { records } = readRecords(dbDir);
+    expect(records.some((r) => r.pv === 'd:openspec/2025-11-invented.md')).toBe(false);
+  });
+
+  it('accepts add_record when the cited provenance file is real', async () => {
+    const { handleAddRecord } = await import('../src/cli/commands/mcp.js');
+    fs.writeFileSync(path.join(dbDir, 'DECISIONS.md'), '# a real doc');
+    const res = await handleAddRecord(dbDir, {
+      kind: 'decision',
+      claim: 'grounded in a doc that exists',
+      provenance: 'd:DECISIONS.md',
+    });
+    expect(res.content[0]!.text).toContain('Created record');
+  });
+
+  it('reports a record written straight to the file with a fabricated source', async () => {
+    const { handleGetRecordDrift } = await import('../src/cli/commands/mcp.js');
+    // Bypass the write-time gate the way a bootstrap subagent did: append raw
+    // NDJSON. Continuous verify must still catch the fabricated provenance.
+    appendRecords(dbDir, [
+      rec({
+        id: 'fab001',
+        kn: 'constraint',
+        cl: 'invented invariant',
+        pv: 'd:openspec/fabricated.md',
+      }),
+    ]);
+    const out = parsed(await handleGetRecordDrift(dbDir));
+    const pointers = out.fabricatedRefs.map((f: { pointer: string }) => f.pointer);
+    expect(pointers).toContain('openspec/fabricated.md');
   });
 });
 

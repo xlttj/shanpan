@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import type { Connection } from '@ladybugdb/core';
 import { queryAll, DB_DIR } from './db.js';
-import { readRecords, liveIds } from './records.js';
+import { readRecords, liveIds, missingProvenanceRefs } from './records.js';
 import type { RecordValidationError } from '../types/record.js';
 
 export interface RecordDriftEntry {
@@ -17,6 +17,12 @@ export interface MissingRefEntry {
   claim: string;
 }
 
+export interface FabricatedRefEntry {
+  recordId: string;
+  pointer: string;
+  claim: string;
+}
+
 export interface RecordDriftReport {
   unresolved: RecordDriftEntry[];
   invalidRecords: RecordValidationError[];
@@ -27,6 +33,15 @@ export interface RecordDriftReport {
    * dead link would trap the agent.
    */
   missingRefs: MissingRefEntry[];
+  /**
+   * Live records whose `pv` provenance cites a d:/t:/n: file that is not on
+   * disk — a fabricated or moved source. Unlike `missingRefs` this is a hard
+   * correctness signal: filesystem existence is unambiguous, the write-time
+   * gate already blocks new ones, and CI/`check` fails on it. It also feeds the
+   * Stop hook (once per state) to catch records written straight to the file,
+   * bypassing the gate.
+   */
+  fabricatedRefs: FabricatedRefEntry[];
 }
 
 /** A ref is a local path we can existence-check; a URL is not. */
@@ -54,6 +69,7 @@ export async function computeRecordDrift(
   const live = liveIds(records);
   const unresolved: RecordDriftEntry[] = [];
   const missingRefs: MissingRefEntry[] = [];
+  const fabricatedRefs: FabricatedRefEntry[] = [];
   for (const rec of records) {
     if (!live.has(rec.id)) continue;
     for (const subject of rec.sb ?? []) {
@@ -64,9 +80,12 @@ export async function computeRecordDrift(
     if (rec.rf && isLocalRef(rec.rf) && !fs.existsSync(path.resolve(projectDir, rec.rf))) {
       missingRefs.push({ recordId: rec.id, ref: rec.rf, claim: rec.cl });
     }
+    for (const pointer of missingProvenanceRefs(rec, projectDir)) {
+      fabricatedRefs.push({ recordId: rec.id, pointer, claim: rec.cl });
+    }
   }
 
-  return { unresolved, invalidRecords: errors, missingRefs };
+  return { unresolved, invalidRecords: errors, missingRefs, fabricatedRefs };
 }
 
 const DRIFT_CACHE_FILE = 'last-drift-report.json';
@@ -77,6 +96,10 @@ interface DriftCache {
 
 export function driftKey(entry: RecordDriftEntry): string {
   return `${entry.recordId} ${entry.subject}`;
+}
+
+export function fabricatedKey(entry: FabricatedRefEntry): string {
+  return `${entry.recordId} pv:${entry.pointer}`;
 }
 
 /**
@@ -95,12 +118,16 @@ export function loadDriftCache(projectDir: string): Set<string> {
   }
 }
 
-/** Persist the current drift set so the next hook call can diff against it. */
-export function saveDriftCache(projectDir: string, drift: RecordDriftEntry[]): void {
+/**
+ * Persist the keys reported this run so the next hook call can diff against
+ * them. Callers pass the already-computed keys (drift + fabricated refs) so a
+ * single cache covers every signal the Stop hook emits once per state.
+ */
+export function saveDriftCache(projectDir: string, keys: string[]): void {
   const cachePath = path.join(projectDir, DB_DIR, DRIFT_CACHE_FILE);
   try {
     fs.mkdirSync(path.dirname(cachePath), { recursive: true });
-    fs.writeFileSync(cachePath, JSON.stringify({ reported: drift.map(driftKey) }), 'utf-8');
+    fs.writeFileSync(cachePath, JSON.stringify({ reported: keys }), 'utf-8');
   } catch {
     // best-effort cache; failure must not break the hook
   }

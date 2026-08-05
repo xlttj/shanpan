@@ -83,6 +83,38 @@ function validProvenance(pv: string): boolean {
 }
 
 /**
+ * The local files a provenance token cites. `t:` (a test), `d:` (a doc) and
+ * `n:` (a code location) all name a file that must exist in the working tree;
+ * `n:` additionally carries a `:line` suffix that is location, not path, so we
+ * strip it. `g:` names a git sha rather than a path, and bare u/a/i carry no
+ * pointer — both yield nothing here.
+ */
+export function provenancePointers(pv: string): string[] {
+  const colon = pv.indexOf(':');
+  if (colon <= 0) return [];
+  const prefix = pv.slice(0, colon);
+  let pointer = pv.slice(colon + 1);
+  if (prefix === 'n') pointer = pointer.replace(/:\d+$/, '');
+  if (prefix === 't' || prefix === 'd' || prefix === 'n') {
+    return pointer.length > 0 ? [pointer] : [];
+  }
+  return [];
+}
+
+/**
+ * Provenance pointers on `rec` that name a local file which is not on disk.
+ * A non-empty result means the record cites a source that isn't in the tree —
+ * fabricated, or moved since it was written. Filesystem existence is
+ * unambiguous, which is what makes this safe as a hard gate at write time,
+ * unlike symbol resolution (which lags behind indexing and stays soft).
+ */
+export function missingProvenanceRefs(rec: KnowledgeRecord, projectDir: string): string[] {
+  return provenancePointers(rec.pv).filter(
+    (p) => !fs.existsSync(path.resolve(projectDir, p)),
+  );
+}
+
+/**
  * Validate one record. Returns an empty array when the record is well-formed.
  * `line` is only used to locate the problem for the caller.
  */

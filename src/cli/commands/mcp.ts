@@ -15,6 +15,7 @@ import {
   nextId,
   formatTs,
   validateRecord,
+  missingProvenanceRefs,
 } from '../../core/records.js';
 import { indexRecords } from '../../core/record-indexer.js';
 import { ancestorDirs } from '../../core/dir-scope.js';
@@ -520,6 +521,13 @@ export async function handleAddRecord(
   }
   if (args.supersedes && !taken.has(args.supersedes)) {
     return textResult(`Cannot supersede '${args.supersedes}' — no such record.`);
+  }
+  const missing = missingProvenanceRefs(rec, projectDir);
+  if (missing.length > 0) {
+    return textResult(
+      `Provenance cites a file that does not exist: ${missing.join(', ')}. ` +
+        "A d:/t:/n: pointer must name a real file you read; if the claim is your own inference, use provenance 'i'.",
+    );
   }
 
   appendRecords(projectDir, [rec]);

@@ -177,6 +177,11 @@ downstream trusts it:
 - "g:<sha>", "t:<path>", "n:<path>:<line>", "d:<path>" when it traces to a
   commit, test, code comment, or document.
 
+**A d:/t:/n: pointer must name a file you actually opened.** specgraph rejects
+the record at write time if the path is not on disk — a fabricated or mistyped
+source cannot be saved. If you are reasoning from a document you did not read,
+you have no source: use provenance "i", not a path you are guessing at.
+
 **Never invent a reason.** If you do not know why a decision was made, omit
 "bc" or record the claim with provenance "i". A plausible-sounding fabricated
 rationale is worse than a gap, because it reads as authoritative and the next
@@ -371,8 +376,10 @@ found before writing anything.
    of judgment here: use "d:" with a URL-ish pointer, or "u" if the user
    confirmed it in conversation.
 
-7. **Verify.** Run "specgraph records index" then "specgraph check". Resolve any
-   unresolved subjects — usually a symbol id that needs "search_symbols" to fix.
+7. **Verify.** Run "specgraph records index" then "specgraph check". "check"
+   fails (exit 1) on any record whose provenance cites a file that is not on
+   disk — the fabrication net. Resolve those, and any unresolved subjects
+   (usually a symbol id that needs "search_symbols" to fix), before you finish.
 
 ## Provenance stays honest
 
@@ -382,7 +389,16 @@ d:path for docs. When YOU add records from judgment, set it just as honestly —
 when you inferred it with no source. Never invent a reason to fill a gap. See the
 knowledge-record skill for the discipline.
 
-Two mistakes are easy to make in bulk here: setting "t:" (a test file) on a
+This is where bootstrapping goes wrong at scale: reading a design.md and
+recording claims about code you never opened, with the design doc typed in as
+proof. Do not. A d:/t:/n: provenance must name a file you actually read, and
+specgraph rejects the record if that path is not on disk — so a fabricated
+source fails the write, and "check" fails the ones written straight to the file.
+If a design doc describes code you have not verified exists, either record it as
+a "source" ("consult this doc about X") or set provenance "i". Do not launder a
+guess into a citation.
+
+Two more mistakes are easy to make in bulk: setting "t:" (a test file) on a
 document that is not a test — a migrated spec or ADR is "d:", not "t:" — and
 guessing a rationale the source does not state. Both compound across a big
 bootstrap. Slow down on provenance.

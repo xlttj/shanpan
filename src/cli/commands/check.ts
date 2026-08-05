@@ -4,6 +4,7 @@ import { openDatabase, closeDatabase, dbExists, queryAll, escId } from '../../co
 import {
   computeRecordDrift,
   driftKey,
+  fabricatedKey,
   loadDriftCache,
   saveDriftCache,
 } from '../../core/record-drift.js';
@@ -87,15 +88,25 @@ async function runHookOutputCheck(projectDir: string, format: HookFormat): Promi
     await closeDatabase(db, conn);
   }
 
-  // Only block on drift that is new since the last hook invocation. Without
+  // Only block on signals that are new since the last hook invocation. Without
   // this, persistent drift re-fires the block on every Stop event and traps
   // the agent in a loop, re-investigating drift it has already been told about
   // and cannot fix without explicit user intent.
   const previouslyReported = loadDriftCache(projectDir);
   const newDrift = report.unresolved.filter((d) => !previouslyReported.has(driftKey(d)));
-  saveDriftCache(projectDir, report.unresolved);
+  const newFabricated = report.fabricatedRefs.filter(
+    (f) => !previouslyReported.has(fabricatedKey(f)),
+  );
+  saveDriftCache(projectDir, [
+    ...report.unresolved.map(driftKey),
+    ...report.fabricatedRefs.map(fabricatedKey),
+  ]);
 
-  if (newDrift.length === 0 && report.invalidRecords.length === 0) {
+  if (
+    newDrift.length === 0 &&
+    newFabricated.length === 0 &&
+    report.invalidRecords.length === 0
+  ) {
     process.stdout.write('{}');
     return;
   }
@@ -106,6 +117,22 @@ async function runHookOutputCheck(projectDir: string, format: HookFormat): Promi
     parts.push(
       `${report.invalidRecords.length} knowledge record(s) fail validation. ` +
         'Run `specgraph records check` to see them — the graph is not being updated from them.',
+    );
+  }
+
+  // Hard signal: a live record's provenance cites a file that isn't on disk.
+  // Filesystem existence is unambiguous, so — unlike unresolved subjects — this
+  // is almost always a fabricated or moved source, not indexing lag.
+  if (newFabricated.length > 0) {
+    const preview = newFabricated
+      .slice(0, 3)
+      .map((f) => `  - ${f.recordId} → pv cites ${f.pointer}`)
+      .join('\n');
+    const more = newFabricated.length > 3 ? `\n  …and ${newFabricated.length - 3} more` : '';
+    parts.push(
+      `${newFabricated.length} record(s) cite a provenance file that does not exist:\n${preview}${more}\n` +
+        'The source was fabricated or has moved. Supersede each with a real d:/t:/n: source, ' +
+        "or with provenance 'i' if the claim is an inference. This is shown once per state.",
     );
   }
 
@@ -172,7 +199,21 @@ export async function runCheck(options: {
           console.log(chalk.gray(`     ${m.claim} — supersede with the new location if it moved`));
         }
       }
-      if (report.invalidRecords.length > 0) process.exitCode = 1;
+      // Hard, CI-failing: a live record's provenance cites a file that isn't on
+      // disk. The write-time gate blocks new ones; this catches records written
+      // straight to the file (e.g. a bootstrap that fabricated its sources).
+      if (report.fabricatedRefs.length > 0) {
+        console.error(
+          chalk.red(`✗ ${report.fabricatedRefs.length} record(s) cite a provenance file that does not exist:`),
+        );
+        for (const f of report.fabricatedRefs) {
+          console.error(chalk.red(`  ${f.recordId} → pv cites ${f.pointer}`));
+          console.error(chalk.gray(`     ${f.claim} — supersede with a real source, or provenance 'i' if inferred`));
+        }
+      }
+      if (report.invalidRecords.length > 0 || report.fabricatedRefs.length > 0) {
+        process.exitCode = 1;
+      }
     } finally {
       await closeDatabase(db, conn);
     }
