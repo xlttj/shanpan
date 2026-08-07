@@ -9,7 +9,7 @@ export interface AnalyzeState {
 const STATE_FILE = 'analyze-state.json';
 
 export function loadAnalyzeState(projectDir: string): AnalyzeState {
-  const p = path.join(projectDir, '.specgraph', STATE_FILE);
+  const p = path.join(projectDir, '.shanpan', STATE_FILE);
   try {
     return JSON.parse(fs.readFileSync(p, 'utf-8')) as AnalyzeState;
   } catch {
@@ -18,6 +18,6 @@ export function loadAnalyzeState(projectDir: string): AnalyzeState {
 }
 
 export function saveAnalyzeState(projectDir: string, state: AnalyzeState): void {
-  const p = path.join(projectDir, '.specgraph', STATE_FILE);
+  const p = path.join(projectDir, '.shanpan', STATE_FILE);
   fs.writeFileSync(p, JSON.stringify(state), 'utf-8');
 }

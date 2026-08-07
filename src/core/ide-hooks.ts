@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { specgraphDriftPluginSource } from '../opencode/specgraph-drift.plugin.js';
+import { shanpanDriftPluginSource } from '../opencode/shanpan-drift.plugin.js';
 
 export interface IdeIntegration {
   id: string;
@@ -20,7 +20,7 @@ const CLAUDE_HOOKS_CONFIG = {
             type: 'command',
             // Reads hook JSON from stdin, outputs spec context for the file being edited.
             // Outputs nothing (allow passthrough) when the file has no linked specs.
-            command: 'specgraph context',
+            command: 'shanpan context',
           },
         ],
       },
@@ -31,7 +31,7 @@ const CLAUDE_HOOKS_CONFIG = {
         hooks: [
           {
             type: 'command',
-            command: 'specgraph analyze > /dev/null 2>&1',
+            command: 'shanpan analyze > /dev/null 2>&1',
             async: true,
           },
         ],
@@ -42,7 +42,7 @@ const CLAUDE_HOOKS_CONFIG = {
         hooks: [
           {
             type: 'command',
-            command: 'specgraph check --hook-output',
+            command: 'shanpan check --hook-output',
           },
         ],
       },
@@ -65,20 +65,20 @@ export const claudeCodeIntegration: IdeIntegration = {
  *
  * The notable absence is a pre-edit context hook. Cursor's `preToolUse` accepts
  * only permission/messages/updated_input, so knowledge reaches the agent through
- * auto-attached rules (`specgraph rules`) instead, regenerated whenever the
+ * auto-attached rules (`shanpan rules`) instead, regenerated whenever the
  * graph changes.
  */
 const CURSOR_HOOKS_CONFIG = {
   version: 1,
   hooks: {
-    sessionStart: [{ command: 'specgraph rules > /dev/null 2>&1' }],
+    sessionStart: [{ command: 'shanpan rules > /dev/null 2>&1' }],
     postToolUse: [
       {
         matcher: 'Write',
-        command: 'specgraph analyze > /dev/null 2>&1 && specgraph rules > /dev/null 2>&1',
+        command: 'shanpan analyze > /dev/null 2>&1 && shanpan rules > /dev/null 2>&1',
       },
     ],
-    stop: [{ command: 'specgraph check --hook-output --format cursor' }],
+    stop: [{ command: 'shanpan check --hook-output --format cursor' }],
   },
 };
 
@@ -91,14 +91,14 @@ export const cursorIntegration: IdeIntegration = {
 
 /**
  * OpenCode experimental shell hooks sync the graph but cannot read hook JSON.
- * Drift feedback to the agent goes through the specgraph-drift plugin on
+ * Drift feedback to the agent goes through the shanpan-drift plugin on
  * session.idle, which calls check --hook-output --format opencode.
  */
 const OPENCODE_HOOKS_CONFIG = {
   experimental: {
     hook: {
-      file_edited: [{ command: ['specgraph', 'analyze'] }],
-      session_completed: [{ command: ['specgraph', 'check'] }],
+      file_edited: [{ command: ['shanpan', 'analyze'] }],
+      session_completed: [{ command: ['shanpan', 'check'] }],
     },
   },
 };
@@ -116,7 +116,7 @@ export const IDE_INTEGRATIONS: IdeIntegration[] = [claudeCodeIntegration, cursor
 /**
  * Concatenate two arrays but drop structurally-identical entries. This keeps
  * the merge idempotent: re-running init/upgrade must not stack another copy of
- * the specgraph hooks, and a settings file that already accumulated duplicates
+ * the shanpan hooks, and a settings file that already accumulated duplicates
  * from an earlier (appending) version self-heals on the next run. User-added
  * entries differ structurally from ours and are always preserved.
  */
@@ -178,5 +178,5 @@ export function installIdeHooks(projectDir: string, ide: IdeIntegration): void {
 export function installOpenCodePlugin(projectDir: string): void {
   const pluginDir = path.join(projectDir, '.opencode', 'plugin');
   fs.mkdirSync(pluginDir, { recursive: true });
-  fs.writeFileSync(path.join(pluginDir, 'specgraph-drift.ts'), specgraphDriftPluginSource, 'utf-8');
+  fs.writeFileSync(path.join(pluginDir, 'shanpan-drift.ts'), shanpanDriftPluginSource, 'utf-8');
 }

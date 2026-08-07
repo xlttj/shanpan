@@ -34,7 +34,7 @@ export async function runQuery(cypher: string): Promise<void> {
   const projectDir = process.cwd();
 
   if (!dbExists(projectDir)) {
-    console.error(chalk.red('No SpecGraph database found. Run `specgraph init` first.'));
+    console.error(chalk.red('No Shanpan database found. Run `shanpan init` first.'));
     process.exit(1);
   }
 

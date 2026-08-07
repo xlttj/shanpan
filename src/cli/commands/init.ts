@@ -12,11 +12,11 @@ import { installGitHooks } from '../../core/git-hooks.js';
 const SKILL_CLIENT_DIRS = ['.claude', '.cursor', '.opencode'] as const;
 
 // Appended to every generated SKILL.md. Lets a later run recognise which skill
-// directories specgraph itself owns, so it can prune ones it no longer ships
+// directories shanpan itself owns, so it can prune ones it no longer ships
 // without ever touching a skill the user wrote by hand.
-const OWNERSHIP_MARKER = '<!-- specgraph-managed-skill -->';
+const OWNERSHIP_MARKER = '<!-- shanpan-managed-skill -->';
 
-/** Delete specgraph-owned skill directories that are no longer in SKILLS. */
+/** Delete shanpan-owned skill directories that are no longer in SKILLS. */
 function pruneStaleSkills(skillsBase: string, current: Set<string>): void {
   if (!fs.existsSync(skillsBase)) return;
   for (const entry of fs.readdirSync(skillsBase, { withFileTypes: true })) {
@@ -105,12 +105,12 @@ export async function runInit(options: { gitHooks?: boolean } = {}): Promise<voi
 
   if (fs.existsSync(dbPath)) {
     console.log(chalk.yellow(`Graph database already exists at ${DB_DIR}/`));
-    console.log(chalk.gray('Run `specgraph status` to inspect the current state.'));
+    console.log(chalk.gray('Run `shanpan status` to inspect the current state.'));
     return;
   }
 
 
-  console.log(chalk.cyan('Initializing SpecGraph…'));
+  console.log(chalk.cyan('Initializing Shanpan…'));
 
   const { db, conn } = await openDatabase(projectDir);
   await ensureSchema(conn);
@@ -142,7 +142,7 @@ export async function runInit(options: { gitHooks?: boolean } = {}): Promise<voi
     if (ide.id === 'opencode') installOpenCodePlugin(projectDir);
     console.log(chalk.green(`✓ Wrote agent hooks to ${ide.settingsPath}`));
     if (ide.id === 'opencode') {
-      console.log(chalk.green('✓ Wrote OpenCode drift plugin to .opencode/plugin/specgraph-drift.ts'));
+      console.log(chalk.green('✓ Wrote OpenCode drift plugin to .opencode/plugin/shanpan-drift.ts'));
     }
   }
   if (selectedIdes.length === 0) {
@@ -163,9 +163,9 @@ export async function runInit(options: { gitHooks?: boolean } = {}): Promise<voi
 
   console.log('');
   console.log(chalk.gray('Next steps:'));
-  console.log(chalk.gray('  1. Run `specgraph analyze` to index code symbols'));
-  console.log(chalk.gray('  2. Run `specgraph bootstrap` to seed records from history (optional)'));
-  console.log(chalk.gray('  3. Run `specgraph status` to inspect the graph'));
+  console.log(chalk.gray('  1. Run `shanpan analyze` to index code symbols'));
+  console.log(chalk.gray('  2. Run `shanpan bootstrap` to seed records from history (optional)'));
+  console.log(chalk.gray('  3. Run `shanpan status` to inspect the graph'));
   console.log('');
-  console.log(chalk.gray('To start the MCP server: specgraph mcp --project-dir <path>'));
+  console.log(chalk.gray('To start the MCP server: shanpan mcp --project-dir <path>'));
 }

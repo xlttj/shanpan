@@ -10,18 +10,23 @@ import { runContext } from './commands/context.js';
 import { runRules } from './commands/rules.js';
 import { runBootstrap } from './commands/bootstrap.js';
 import { runRecordsIndex, runRecordsCheck, runRecordsAdd } from './commands/records.js';
+import { migrateLegacyLayout } from '../core/db.js';
 import { RECORD_KINDS } from '../types/record.js';
+
+// Rename a pre-shanpan .specgraph/ layout before any command reads it. All
+// commands operate on cwd, so one call here covers every subcommand.
+migrateLegacyLayout(process.cwd());
 
 const program = new Command();
 
 program
-  .name('specgraph')
+  .name('shanpan')
   .description('Agent-native code knowledge graph')
   .version('0.1.0');
 
 program
   .command('init')
-  .description('Initialize .specgraph/ in the current project')
+  .description('Initialize .shanpan/ in the current project')
   .option('--no-git-hooks', 'Do not install git hooks (checkout/merge rebuild, pre-commit check)')
   .action((opts) => runInit({ gitHooks: opts.gitHooks as boolean }));
 
@@ -38,7 +43,7 @@ program
 program
   .command('mcp')
   .description('Start MCP server (stdio)')
-  .option('--project-dir <path>', 'Project root containing .specgraph/ (defaults to cwd)')
+  .option('--project-dir <path>', 'Project root containing .shanpan/ (defaults to cwd)')
   .action((opts) => runMcp({ projectDir: opts.projectDir as string | undefined }));
 
 program
@@ -115,7 +120,7 @@ program
 
 const records = program
   .command('records')
-  .description('Work with the knowledge record file (.specgraph/knowledge.ndjson)');
+  .description('Work with the knowledge record file (.shanpan/knowledge.ndjson)');
 
 records
   .command('index')

@@ -1,11 +1,11 @@
 {
-  "name": "specgraph",
+  "name": "shanpan",
   "version": "0.1.0",
   "description": "CLI and MCP server that stores agent-native code knowledge as a graph in LadybugDB",
   "license": "MIT",
   "type": "module",
   "bin": {
-    "specgraph": "./dist/cli/index.js"
+    "shanpan": "./dist/cli/index.js"
   },
   "files": [
     "dist/",

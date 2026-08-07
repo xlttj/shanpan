@@ -17,15 +17,15 @@ import {
   missingProvenanceRefs,
 } from '../src/core/records.js';
 import { indexRecords, provenanceKind } from '../src/core/record-indexer.js';
-import { openDatabase, closeDatabase, queryAll, dropAndRecreateSchema } from '../src/core/db.js';
+import { openDatabase, closeDatabase, queryAll, dropAndRecreateSchema, migrateLegacyLayout } from '../src/core/db.js';
 import type { KnowledgeRecord } from '../src/types/record.js';
 import type { Database, Connection } from '@ladybugdb/core';
 
 let tmpDir: string;
 
 beforeEach(() => {
-  tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'specgraph-records-'));
-  fs.mkdirSync(path.join(tmpDir, '.specgraph'), { recursive: true });
+  tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'shanpan-records-'));
+  fs.mkdirSync(path.join(tmpDir, '.shanpan'), { recursive: true });
 });
 
 afterEach(() => {
@@ -355,8 +355,8 @@ describe('record MCP handlers', () => {
   let dbDir: string;
 
   beforeEach(async () => {
-    dbDir = fs.mkdtempSync(path.join(os.tmpdir(), 'specgraph-recmcp-'));
-    fs.mkdirSync(path.join(dbDir, '.specgraph'), { recursive: true });
+    dbDir = fs.mkdtempSync(path.join(os.tmpdir(), 'shanpan-recmcp-'));
+    fs.mkdirSync(path.join(dbDir, '.shanpan'), { recursive: true });
     const { db, conn } = await openDatabase(dbDir);
     await dropAndRecreateSchema(conn);
     for (const [id, fqn] of [
@@ -594,8 +594,8 @@ describe('directory anchoring', () => {
   let dbDir: string;
 
   beforeEach(async () => {
-    dbDir = fs.mkdtempSync(path.join(os.tmpdir(), 'specgraph-diranchor-'));
-    fs.mkdirSync(path.join(dbDir, '.specgraph'), { recursive: true });
+    dbDir = fs.mkdtempSync(path.join(os.tmpdir(), 'shanpan-diranchor-'));
+    fs.mkdirSync(path.join(dbDir, '.shanpan'), { recursive: true });
     // A real module subtree the fallback can resolve, plus a sibling with a
     // shared prefix to prove segment-boundary matching.
     fs.mkdirSync(path.join(dbDir, 'apps/bmf/src/Consumers'), { recursive: true });
@@ -688,8 +688,8 @@ describe('stale-graph diagnostics', () => {
   let dbDir: string;
 
   beforeEach(() => {
-    dbDir = fs.mkdtempSync(path.join(os.tmpdir(), 'specgraph-stale-'));
-    fs.mkdirSync(path.join(dbDir, '.specgraph'), { recursive: true });
+    dbDir = fs.mkdtempSync(path.join(os.tmpdir(), 'shanpan-stale-'));
+    fs.mkdirSync(path.join(dbDir, '.shanpan'), { recursive: true });
   });
 
   afterEach(() => {
@@ -746,7 +746,7 @@ describe('diagnoseError', () => {
   it('passes a non-schema error through without a false migration hint', async () => {
     const { diagnoseError } = await import('../src/cli/commands/mcp.js');
     const res = diagnoseError(new Error('something unrelated exploded'));
-    expect(res.content[0]!.text).toContain('specgraph error');
+    expect(res.content[0]!.text).toContain('shanpan error');
     expect(res.content[0]!.text).not.toContain('analyze --full');
   });
 });
@@ -778,8 +778,8 @@ describe('indexRecords', () => {
   let dbDir: string;
 
   beforeEach(async () => {
-    dbDir = fs.mkdtempSync(path.join(os.tmpdir(), 'specgraph-recidx-'));
-    fs.mkdirSync(path.join(dbDir, '.specgraph'), { recursive: true });
+    dbDir = fs.mkdtempSync(path.join(os.tmpdir(), 'shanpan-recidx-'));
+    fs.mkdirSync(path.join(dbDir, '.shanpan'), { recursive: true });
     ({ db, conn } = await openDatabase(dbDir));
     await dropAndRecreateSchema(conn);
     const r = await conn.query(
@@ -898,5 +898,49 @@ describe('indexRecords', () => {
     await indexRecords(conn, [rec({ id: 'aaa111', cl: "it's a 'quoted' claim" })]);
     const { rows } = await queryAll(conn, 'MATCH (r:Record) RETURN r.claim AS claim');
     expect(rows[0]?.['claim']).toBe("it's a 'quoted' claim");
+  });
+});
+
+// ─── legacy .specgraph → .shanpan migration ──────────────────────────────────
+
+describe('migrateLegacyLayout', () => {
+  let dir: string;
+  beforeEach(() => {
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), 'shanpan-migrate-'));
+  });
+  afterEach(() => {
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  it('renames a committed .specgraph/ dir to .shanpan/, preserving knowledge byte-for-byte', () => {
+    fs.mkdirSync(path.join(dir, '.specgraph'));
+    const knowledge = '{"id":"aa11bb","kn":"intent","cl":"x","pv":"u","ts":"20260617143022"}\n';
+    fs.writeFileSync(path.join(dir, '.specgraph', 'knowledge.ndjson'), knowledge);
+    fs.writeFileSync(path.join(dir, '.specgraphrc.json'), '{"languages":["php"]}');
+
+    migrateLegacyLayout(dir);
+
+    expect(fs.existsSync(path.join(dir, '.specgraph'))).toBe(false);
+    expect(fs.readFileSync(path.join(dir, '.shanpan', 'knowledge.ndjson'), 'utf-8')).toBe(knowledge);
+    expect(fs.existsSync(path.join(dir, '.specgraphrc.json'))).toBe(false);
+    expect(fs.existsSync(path.join(dir, '.shanpanrc.json'))).toBe(true);
+  });
+
+  it('is a silent no-op when there is nothing to migrate', () => {
+    expect(() => migrateLegacyLayout(dir)).not.toThrow();
+    expect(fs.existsSync(path.join(dir, '.shanpan'))).toBe(false);
+  });
+
+  it('never clobbers a live .shanpan/ — leaves the legacy dir untouched', () => {
+    fs.mkdirSync(path.join(dir, '.specgraph'));
+    fs.writeFileSync(path.join(dir, '.specgraph', 'knowledge.ndjson'), 'old\n');
+    fs.mkdirSync(path.join(dir, '.shanpan'));
+    fs.writeFileSync(path.join(dir, '.shanpan', 'knowledge.ndjson'), 'current\n');
+
+    migrateLegacyLayout(dir);
+
+    // The live layout wins; the stale legacy dir is left for the user to remove.
+    expect(fs.readFileSync(path.join(dir, '.shanpan', 'knowledge.ndjson'), 'utf-8')).toBe('current\n');
+    expect(fs.existsSync(path.join(dir, '.specgraph'))).toBe(true);
   });
 });

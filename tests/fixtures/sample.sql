@@ -1,4 +1,4 @@
--- Sample SQL fixture for specgraph parser tests
+-- Sample SQL fixture for shanpan parser tests
 -- Covers: table, view, function, procedure, trigger across dialects
 
 -- ── Tables ────────────────────────────────────────────────────────────────────

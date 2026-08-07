@@ -6,7 +6,7 @@ export async function runStatus(): Promise<void> {
   const projectDir = process.cwd();
 
   if (!dbExists(projectDir)) {
-    console.error(chalk.red('No SpecGraph database found. Run `specgraph init` first.'));
+    console.error(chalk.red('No Shanpan database found. Run `shanpan init` first.'));
     process.exit(1);
   }
 
@@ -16,7 +16,7 @@ export async function runStatus(): Promise<void> {
     const stats = await getGraphStats(conn);
     const totalEdges = Object.values(stats.edges).reduce((a, b) => a + b, 0);
 
-    console.log(chalk.bold('SpecGraph Status'));
+    console.log(chalk.bold('Shanpan Status'));
     console.log(chalk.gray('─'.repeat(40)));
     console.log('');
     console.log(chalk.bold('Nodes'));

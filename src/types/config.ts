@@ -7,11 +7,11 @@ export interface AnalyzeConfig {
   languages: string[];
 }
 
-export interface SpecGraphConfig {
+export interface ShanpanConfig {
   analyze: AnalyzeConfig;
 }
 
-export const DEFAULT_CONFIG: SpecGraphConfig = {
+export const DEFAULT_CONFIG: ShanpanConfig = {
   analyze: {
     include: ['src'],
     exclude: ['node_modules', 'dist', '.git', 'vendor', 'build', 'coverage'],

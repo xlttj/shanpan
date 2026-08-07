@@ -10,42 +10,42 @@ import { execFileSync } from 'node:child_process';
  * that; a pre-commit gate blocks a commit that breaks a record's subject.
  *
  * These live in .git/hooks, which is per-clone and never committed, so they are
- * installed by `specgraph init` rather than shipped in the repo.
+ * installed by `shanpan init` rather than shipped in the repo.
  */
 
 // A marked block, so re-running init updates our section in place and a user's
 // own hook body is never touched.
-export const HOOK_BEGIN = '# >>> specgraph managed >>>';
-export const HOOK_END = '# <<< specgraph managed <<<';
+export const HOOK_BEGIN = '# >>> shanpan managed >>>';
+export const HOOK_END = '# <<< shanpan managed <<<';
 
 /** Hook name → the shell body of our managed block (without the markers). */
 export const GIT_HOOKS: Record<string, string> = {
   // $3 == 1 marks a branch checkout; 0 is a file checkout, which must not rebuild.
   'post-checkout': [
     '[ "$3" = "1" ] || exit 0',
-    'command -v specgraph >/dev/null 2>&1 || exit 0',
+    'command -v shanpan >/dev/null 2>&1 || exit 0',
     'root=$(git rev-parse --show-toplevel 2>/dev/null) || exit 0',
     'cd "$root" || exit 0',
-    '[ -f .specgraph/graph.db ] || exit 0',
-    'specgraph analyze >/dev/null 2>&1 || true',
+    '[ -f .shanpan/graph.db ] || exit 0',
+    'shanpan analyze >/dev/null 2>&1 || true',
   ].join('\n'),
 
   'post-merge': [
-    'command -v specgraph >/dev/null 2>&1 || exit 0',
+    'command -v shanpan >/dev/null 2>&1 || exit 0',
     'root=$(git rev-parse --show-toplevel 2>/dev/null) || exit 0',
     'cd "$root" || exit 0',
-    '[ -f .specgraph/graph.db ] || exit 0',
-    'specgraph analyze >/dev/null 2>&1 || true',
+    '[ -f .shanpan/graph.db ] || exit 0',
+    'shanpan analyze >/dev/null 2>&1 || true',
   ].join('\n'),
 
   // The one hook that is allowed to fail the git operation: a hard integrity
   // violation (record points at code being deleted/renamed) should block.
   'pre-commit': [
-    'command -v specgraph >/dev/null 2>&1 || exit 0',
+    'command -v shanpan >/dev/null 2>&1 || exit 0',
     'root=$(git rev-parse --show-toplevel 2>/dev/null) || exit 0',
     'cd "$root" || exit 0',
-    '[ -f .specgraph/graph.db ] || exit 0',
-    'specgraph check --staged',
+    '[ -f .shanpan/graph.db ] || exit 0',
+    'shanpan check --staged',
   ].join('\n'),
 };
 
@@ -89,7 +89,7 @@ function resolveHooksDir(projectDir: string): string | null {
 }
 
 /**
- * Install (or update) the specgraph git hooks. Returns the hook names written,
+ * Install (or update) the shanpan git hooks. Returns the hook names written,
  * or null when the directory is not a git repository.
  */
 export function installGitHooks(projectDir: string): string[] | null {

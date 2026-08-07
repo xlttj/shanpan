@@ -60,7 +60,7 @@ export type HookFormat = 'claude' | 'cursor' | 'opencode';
  * Claude Code blocks a Stop with decision/reason. Cursor's native `stop` hook
  * has no block field at all — the only way to feed text back to the model is
  * followup_message, which it auto-submits as the next user message. OpenCode
- * config shell hooks ignore stdout JSON; the specgraph-drift plugin reads the
+ * config shell hooks ignore stdout JSON; the shanpan-drift plugin reads the
  * opencode dialect and calls client.session.prompt on session.idle.
  */
 export function blockResponse(format: HookFormat, reason: string): string {
@@ -116,7 +116,7 @@ async function runHookOutputCheck(projectDir: string, format: HookFormat): Promi
   if (report.invalidRecords.length > 0) {
     parts.push(
       `${report.invalidRecords.length} knowledge record(s) fail validation. ` +
-        'Run `specgraph records check` to see them — the graph is not being updated from them.',
+        'Run `shanpan records check` to see them — the graph is not being updated from them.',
     );
   }
 
@@ -167,7 +167,7 @@ export async function runCheck(options: {
   }
 
   if (!dbExists(projectDir)) {
-    console.log(chalk.gray('No SpecGraph database found — skipping knowledge integrity check.'));
+    console.log(chalk.gray('No Shanpan database found — skipping knowledge integrity check.'));
     return;
   }
 

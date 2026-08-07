@@ -8,7 +8,7 @@ import { DEFAULT_CONFIG } from '../src/types/config.js';
 let tmpDir: string;
 
 beforeEach(() => {
-  tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'specgraph-watcher-'));
+  tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'shanpan-watcher-'));
   // Create the directories the watcher expects
   fs.mkdirSync(path.join(tmpDir, 'src'), { recursive: true });
   fs.mkdirSync(path.join(tmpDir, 'specs'), { recursive: true });
@@ -59,8 +59,8 @@ describe('watchAndReindex', () => {
     }
   }, 10_000);
 
-  it('ignores files under .specgraph to prevent feedback loops', async () => {
-    fs.mkdirSync(path.join(tmpDir, '.specgraph'), { recursive: true });
+  it('ignores files under .shanpan to prevent feedback loops', async () => {
+    fs.mkdirSync(path.join(tmpDir, '.shanpan'), { recursive: true });
     let flushCount = 0;
     const config = {
       ...DEFAULT_CONFIG,
@@ -76,9 +76,9 @@ describe('watchAndReindex', () => {
     });
 
     try {
-      // Writing inside .specgraph must not trigger a flush — wait the full
+      // Writing inside .shanpan must not trigger a flush — wait the full
       // debounce window plus a generous buffer to confirm nothing fires.
-      fs.writeFileSync(path.join(tmpDir, '.specgraph', 'graph.db'), 'binary junk');
+      fs.writeFileSync(path.join(tmpDir, '.shanpan', 'graph.db'), 'binary junk');
       await waitUntil(() => flushCount > 0, 2800);
       expect(flushCount).toBe(0);
     } finally {

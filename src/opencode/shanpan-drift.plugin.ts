@@ -1,16 +1,16 @@
 /**
- * Template copied to .opencode/plugin/specgraph-drift.ts by specgraph init/upgrade.
+ * Template copied to .opencode/plugin/shanpan-drift.ts by shanpan init/upgrade.
  */
 
-export const PLUGIN_MARKER = '<!-- specgraph-managed-plugin -->';
+export const PLUGIN_MARKER = '<!-- shanpan-managed-plugin -->';
 
-export const specgraphDriftPluginSource = `import type { Plugin } from "@opencode-ai/plugin";
+export const shanpanDriftPluginSource = `import type { Plugin } from "@opencode-ai/plugin";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 
 const execFileAsync = promisify(execFile);
 
-const SpecgraphDriftPlugin: Plugin = async ({ client }) => {
+const ShanpanDriftPlugin: Plugin = async ({ client }) => {
   return {
     event: async ({ event }) => {
       if (event.type !== "session.idle") return;
@@ -20,7 +20,7 @@ const SpecgraphDriftPlugin: Plugin = async ({ client }) => {
       let stdout: string;
       try {
         ({ stdout } = await execFileAsync(
-          "specgraph",
+          "shanpan",
           ["check", "--hook-output", "--format", "opencode"],
           { cwd: process.cwd() },
         ));
@@ -44,7 +44,7 @@ const SpecgraphDriftPlugin: Plugin = async ({ client }) => {
   };
 };
 
-export default SpecgraphDriftPlugin;
+export default ShanpanDriftPlugin;
 
 ${PLUGIN_MARKER}
 `;

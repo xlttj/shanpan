@@ -4,7 +4,7 @@ import path from 'node:path';
 import { Worker } from 'node:worker_threads';
 import { fileURLToPath } from 'node:url';
 import type { Connection } from '@ladybugdb/core';
-import type { SpecGraphConfig } from '../types/config.js';
+import type { ShanpanConfig } from '../types/config.js';
 import type { CodeSymbol, CallRef } from '../types/code.js';
 import { walkFiles } from './walker.js';
 import { getParserForExtension, getExtensionsForLanguages } from './languages/index.js';
@@ -219,7 +219,7 @@ function parseSerial(
 
 // Resolve the worker script path. Returns null if not available (e.g. unbuilt dev tree).
 function resolveWorkerScript(): string | null {
-  if (process.env['SPECGRAPH_WORKERS'] === '0') return null;
+  if (process.env['SHANPAN_WORKERS'] === '0') return null;
   try {
     const thisFile = fileURLToPath(import.meta.url);
     // dist/cli/index.js → dist/analyzer/parse-worker.js
@@ -308,7 +308,7 @@ async function parseWithWorkers(
 export async function analyzeAndIndex(
   conn: Connection,
   projectDir: string,
-  config: SpecGraphConfig,
+  config: ShanpanConfig,
   onProgress?: (phase: 'scan' | 'index', n: number, total: number) => void,
 ): Promise<AnalysisStats> {
   const stats: AnalysisStats = {
@@ -366,7 +366,7 @@ export async function analyzeAndIndex(
 export async function analyzeAndIndexIncremental(
   conn: Connection,
   projectDir: string,
-  config: SpecGraphConfig,
+  config: ShanpanConfig,
   changedPaths: Set<string>,
   deletedPaths: Set<string>,
   onProgress?: (phase: 'scan' | 'index', n: number, total: number) => void,

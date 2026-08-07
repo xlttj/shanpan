@@ -92,7 +92,7 @@ describe('get_undocumented_symbols tool logic', () => {
   let dbDir: string;
 
   beforeEach(async () => {
-    dbDir = fs.mkdtempSync(path.join(os.tmpdir(), 'specgraph-undoc-'));
+    dbDir = fs.mkdtempSync(path.join(os.tmpdir(), 'shanpan-undoc-'));
     ({ db, conn } = await openDatabase(dbDir));
     await dropAndRecreateSchema(conn);
   });
@@ -172,9 +172,9 @@ describe('call-graph handlers', () => {
   let conn: Connection;
 
   beforeEach(async () => {
-    dbDir = fs.mkdtempSync(path.join(os.tmpdir(), 'specgraph-callgraph-'));
-    // .specgraph is a directory (see DB_DIR)
-    fs.mkdirSync(path.join(dbDir, '.specgraph'), { recursive: true });
+    dbDir = fs.mkdtempSync(path.join(os.tmpdir(), 'shanpan-callgraph-'));
+    // .shanpan is a directory (see DB_DIR)
+    fs.mkdirSync(path.join(dbDir, '.shanpan'), { recursive: true });
     ({ db, conn } = await openDatabase(dbDir));
     await dropAndRecreateSchema(conn);
     // Seed: a → b → c, a → d, d → b (cycle back)
@@ -284,8 +284,8 @@ describe('search_symbols handler', () => {
   let conn: Connection;
 
   beforeEach(async () => {
-    dbDir = fs.mkdtempSync(path.join(os.tmpdir(), 'specgraph-search-'));
-    fs.mkdirSync(path.join(dbDir, '.specgraph'), { recursive: true });
+    dbDir = fs.mkdtempSync(path.join(os.tmpdir(), 'shanpan-search-'));
+    fs.mkdirSync(path.join(dbDir, '.shanpan'), { recursive: true });
     ({ db, conn } = await openDatabase(dbDir));
     await dropAndRecreateSchema(conn);
     const rows: [string, string, string][] = [

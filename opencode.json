@@ -5,7 +5,7 @@
       "file_edited": [
         {
           "command": [
-            "specgraph",
+            "shanpan",
             "analyze"
           ]
         }
@@ -13,7 +13,7 @@
       "session_completed": [
         {
           "command": [
-            "specgraph",
+            "shanpan",
             "check"
           ]
         }
@@ -21,10 +21,10 @@
     }
   },
   "mcp": {
-    "specgraph": {
+    "shanpan": {
       "type": "local",
       "command": [
-        "specgraph",
+        "shanpan",
         "mcp",
         "--project-dir",
         "/Users/axel.tietje/Code/xlttj/chi"

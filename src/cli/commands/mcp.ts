@@ -6,7 +6,7 @@ import {
   CallToolRequestSchema,
   ListToolsRequestSchema,
 } from '@modelcontextprotocol/sdk/types.js';
-import { openDatabase, closeDatabase, dbExists, queryAll, escId, ensureSchema } from '../../core/db.js';
+import { openDatabase, closeDatabase, dbExists, queryAll, escId, ensureSchema, migrateLegacyLayout } from '../../core/db.js';
 import type { Connection } from '@ladybugdb/core';
 import { computeRecordDrift } from '../../core/record-drift.js';
 import {
@@ -40,12 +40,12 @@ export function diagnoseError(err: unknown): { content: { type: 'text'; text: st
   const msg = err instanceof Error ? err.message : String(err);
   if (/binder|cannot find property|does not exist|no such|catalog|table/i.test(msg)) {
     return textResult(
-      'specgraph: the graph database looks out of date — it likely predates a schema change ' +
-        `(${msg}). Rebuild it with 'specgraph analyze --full' then 'specgraph records index' ` +
+      'shanpan: the graph database looks out of date — it likely predates a schema change ' +
+        `(${msg}). Rebuild it with 'shanpan analyze --full' then 'shanpan records index' ` +
         '(or call the reindex tool), which recreates the graph against the current schema.',
     );
   }
-  return textResult(`specgraph error: ${msg}`);
+  return textResult(`shanpan error: ${msg}`);
 }
 
 /** True when knowledge.ndjson holds records the graph does not have indexed. */
@@ -68,8 +68,8 @@ async function emptyRecordResult(
   const onDisk = await graphMissingRecords(projectDir, conn);
   if (onDisk !== null) {
     return textResult(
-      `specgraph: knowledge.ndjson holds ${onDisk} record(s) but none are indexed in the graph. ` +
-        "Run 'specgraph records index' (or call the reindex tool) to make them queryable. " +
+      `shanpan: knowledge.ndjson holds ${onDisk} record(s) but none are indexed in the graph. ` +
+        "Run 'shanpan records index' (or call the reindex tool) to make them queryable. " +
         'This is stale data, not an empty knowledge base.',
     );
   }
@@ -302,7 +302,7 @@ const RECORD_RETURN =
 /**
  * Records attached to a symbol, to its containing file, and — when the symbol
  * is a method — to its parent class. A bare file path returns every live
- * record on any symbol in that file (same grouping as specgraph rules).
+ * record on any symbol in that file (same grouping as shanpan rules).
  * Mirrors what the PreToolUse hook injects, so an agent can ask for the same
  * knowledge mid-task.
  */
@@ -459,7 +459,7 @@ export async function handleGetRecordDrift(
     // silent lie.
     const graphStale =
       onDisk !== null
-        ? `knowledge.ndjson has ${onDisk} record(s) but the graph has none indexed — run 'specgraph records index'.`
+        ? `knowledge.ndjson has ${onDisk} record(s) but the graph has none indexed — run 'shanpan records index'.`
         : null;
     return jsonResult({ ...report, graphStale });
   } finally {
@@ -492,7 +492,7 @@ export async function handleAddRecord(
   if (errors.length > 0) {
     return textResult(
       `Refusing to append — the knowledge file has ${errors.length} invalid record(s). ` +
-        `Run 'specgraph records check' to see them.`,
+        `Run 'shanpan records check' to see them.`,
     );
   }
   if (!(RECORD_KINDS as readonly string[]).includes(args.kind)) {
@@ -536,9 +536,11 @@ export async function handleAddRecord(
 
 export async function runMcp(options: { projectDir?: string } = {}): Promise<void> {
   const projectDir = options.projectDir ? path.resolve(options.projectDir) : process.cwd();
+  // A repo bootstrapped under the old name must not read as empty here.
+  migrateLegacyLayout(projectDir);
 
   const server = new Server(
-    { name: 'specgraph', version: '0.1.0' },
+    { name: 'shanpan', version: '0.1.0' },
     { capabilities: { tools: {} } },
   );
 
@@ -751,7 +753,7 @@ export async function runMcp(options: { projectDir?: string } = {}): Promise<voi
     const a = (args ?? {}) as Record<string, unknown>;
 
     if (!dbExists(projectDir) && name !== 'add_record') {
-      return textResult('No SpecGraph database found. Run `specgraph init` first.');
+      return textResult('No Shanpan database found. Run `shanpan init` first.');
     }
 
 
@@ -803,7 +805,7 @@ export async function runMcp(options: { projectDir?: string } = {}): Promise<voi
       const { records, errors } = readRecords(projectDir);
       if (errors.length > 0) {
         return textResult(
-          `Refusing to index — ${errors.length} invalid record(s). Run 'specgraph records check'.`,
+          `Refusing to index — ${errors.length} invalid record(s). Run 'shanpan records check'.`,
         );
       }
       const { db, conn } = await openDatabase(projectDir);
@@ -815,7 +817,7 @@ export async function runMcp(options: { projectDir?: string } = {}): Promise<voi
           `✓ Indexed ${stats.records} record(s): ${stats.live} live, ${stats.about} subject link(s), ${stats.supersedes} supersede edge(s)`,
         ];
         if (stats.unresolved.length > 0) {
-          lines.push(`⚠ ${stats.unresolved.length} unresolved subject(s) — run 'specgraph analyze', or the symbol moved.`);
+          lines.push(`⚠ ${stats.unresolved.length} unresolved subject(s) — run 'shanpan analyze', or the symbol moved.`);
         }
         return textResult(lines.join('\n'));
       } finally {

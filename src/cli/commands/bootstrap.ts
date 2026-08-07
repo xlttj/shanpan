@@ -192,7 +192,7 @@ export async function runBootstrap(options: BootstrapOptions = {}): Promise<void
   // ── report ──────────────────────────────────────────────────────────────────
   const total = counts.gotcha + counts.rejected + counts.decision;
 
-  console.log(chalk.bold('specgraph bootstrap'));
+  console.log(chalk.bold('shanpan bootstrap'));
   console.log(chalk.gray('─'.repeat(40)));
   console.log(`  ${chalk.cyan('gotcha')}   (marker comments)  ${counts.gotcha}`);
   console.log(`  ${chalk.cyan('rejected')} (git reverts)      ${counts.rejected}`);
@@ -223,7 +223,7 @@ export async function runBootstrap(options: BootstrapOptions = {}): Promise<void
 
   appendRecords(projectDir, nextRecords);
   console.log('');
-  console.log(chalk.green(`✓ Added ${total} record(s) to .specgraph/knowledge.ndjson`));
+  console.log(chalk.green(`✓ Added ${total} record(s) to .shanpan/knowledge.ndjson`));
 
   if (dbExists(projectDir)) {
     const { db, conn } = await openDatabase(projectDir);
@@ -234,13 +234,13 @@ export async function runBootstrap(options: BootstrapOptions = {}): Promise<void
       const stats = await indexRecords(conn, records, projectDir);
       console.log(chalk.green(`✓ Indexed: ${stats.live} live record(s), ${stats.about} subject link(s)`));
       if (stats.unresolved.length > 0) {
-        console.log(chalk.yellow(`  ⚠ ${stats.unresolved.length} unresolved subject(s) — run 'specgraph analyze' first.`));
+        console.log(chalk.yellow(`  ⚠ ${stats.unresolved.length} unresolved subject(s) — run 'shanpan analyze' first.`));
       }
     } finally {
       await closeDatabase(db, conn);
     }
   } else {
-    console.log(chalk.gray("  Run 'specgraph analyze' then 'specgraph records index' to make them queryable."));
+    console.log(chalk.gray("  Run 'shanpan analyze' then 'shanpan records index' to make them queryable."));
   }
 
   printGap();

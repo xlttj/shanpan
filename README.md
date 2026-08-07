@@ -1,6 +1,6 @@
-# specgraph
+# shanpan
 
-SpecGraph stores software specifications as a knowledge graph and exposes them to AI agents via the Model Context Protocol. Specs are Markdown files with structured YAML frontmatter that link to code symbols; the graph tracks which functions, classes, and files implement which requirements, and surfaces drift when code changes break those links.
+Shanpan stores software specifications as a knowledge graph and exposes them to AI agents via the Model Context Protocol. Specs are Markdown files with structured YAML frontmatter that link to code symbols; the graph tracks which functions, classes, and files implement which requirements, and surfaces drift when code changes break those links.
 
 ## Requirements
 
@@ -9,31 +9,31 @@ Node.js 20 or later.
 ## Install
 
 ```bash
-npm install -g specgraph
+npm install -g shanpan
 ```
 
 ## Project setup
 
 ```bash
-specgraph init           # create .specgraph/, write .specgraphrc.json, install agent skills and hooks
-specgraph index          # parse spec Markdown files into the graph
-specgraph analyze        # scan source code and link symbols to specs (incremental)
-specgraph analyze --full # force a complete rebuild, ignoring cached state
+shanpan init           # create .shanpan/, write .shanpanrc.json, install agent skills and hooks
+shanpan index          # parse spec Markdown files into the graph
+shanpan analyze        # scan source code and link symbols to specs (incremental)
+shanpan analyze --full # force a complete rebuild, ignoring cached state
 ```
 
-`specgraph init` detects which AI coding tool the project uses and installs agent skills and hooks automatically. Supported tools: **Claude Code**, **Cursor**, **OpenCode**. Skills are written to the tool's client directory (e.g. `.claude/skills/`); hooks wire `specgraph analyze` and `specgraph check` into the agent's file-edit and session-end events.
+`shanpan init` detects which AI coding tool the project uses and installs agent skills and hooks automatically. Supported tools: **Claude Code**, **Cursor**, **OpenCode**. Skills are written to the tool's client directory (e.g. `.claude/skills/`); hooks wire `shanpan analyze` and `shanpan check` into the agent's file-edit and session-end events.
 
-Configuration is stored in `.specgraphrc.json` at the project root. If the file already exists when `init` runs it is left untouched.
+Configuration is stored in `.shanpanrc.json` at the project root. If the file already exists when `init` runs it is left untouched.
 
 ## MCP configuration
 
-Add the following to your MCP client's server configuration. `--project-dir` must be the absolute path to the project root that contains `.specgraph/`.
+Add the following to your MCP client's server configuration. `--project-dir` must be the absolute path to the project root that contains `.shanpan/`.
 
 ```json
 {
   "mcpServers": {
-    "specgraph": {
-      "command": "specgraph",
+    "shanpan": {
+      "command": "shanpan",
       "args": ["mcp", "--project-dir", "/absolute/path/to/your/project"]
     }
   }

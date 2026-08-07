@@ -15,7 +15,7 @@ import type { ContextRecord } from '../src/core/record-format.js';
 let tmpDir: string;
 
 beforeEach(() => {
-  tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'specgraph-rules-'));
+  tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'shanpan-rules-'));
 });
 
 afterEach(() => {
@@ -38,7 +38,7 @@ function rulesPath(name: string): string {
 
 describe('ruleFileName', () => {
   it('derives a flat filename from a nested source path', () => {
-    expect(ruleFileName('src/core/watcher.ts')).toBe('specgraph-src-core-watcher-ts.mdc');
+    expect(ruleFileName('src/core/watcher.ts')).toBe('shanpan-src-core-watcher-ts.mdc');
   });
 
   it('gives different files different names', () => {
@@ -46,7 +46,7 @@ describe('ruleFileName', () => {
   });
 
   it('leaves no leading or trailing separator for dotfiles', () => {
-    expect(ruleFileName('.specgraphrc.json')).toBe('specgraph-specgraphrc-json.mdc');
+    expect(ruleFileName('.shanpanrc.json')).toBe('shanpan-shanpanrc-json.mdc');
   });
 });
 
@@ -89,8 +89,8 @@ describe('writeRules', () => {
   it('writes one rule file per subject file', () => {
     const { written } = writeRules(tmpDir, groups);
     expect(written).toHaveLength(2);
-    expect(fs.existsSync(rulesPath('specgraph-src-a-ts.mdc'))).toBe(true);
-    expect(fs.existsSync(rulesPath('specgraph-src-b-ts.mdc'))).toBe(true);
+    expect(fs.existsSync(rulesPath('shanpan-src-a-ts.mdc'))).toBe(true);
+    expect(fs.existsSync(rulesPath('shanpan-src-b-ts.mdc'))).toBe(true);
   });
 
   it('is idempotent — a second run leaves the same set of files', () => {
@@ -104,9 +104,9 @@ describe('writeRules', () => {
   it('prunes a rule whose file no longer has records', () => {
     writeRules(tmpDir, groups);
     const { pruned } = writeRules(tmpDir, [groups[0]!]);
-    expect(pruned).toEqual(['specgraph-src-b-ts.mdc']);
-    expect(fs.existsSync(rulesPath('specgraph-src-b-ts.mdc'))).toBe(false);
-    expect(fs.existsSync(rulesPath('specgraph-src-a-ts.mdc'))).toBe(true);
+    expect(pruned).toEqual(['shanpan-src-b-ts.mdc']);
+    expect(fs.existsSync(rulesPath('shanpan-src-b-ts.mdc'))).toBe(false);
+    expect(fs.existsSync(rulesPath('shanpan-src-a-ts.mdc'))).toBe(true);
   });
 
   it('never deletes a hand-written rule that lacks the marker', () => {
@@ -125,6 +125,6 @@ describe('writeRules', () => {
     writeRules(tmpDir, groups);
     const { written, pruned } = writeRules(tmpDir, []);
     expect(written).toEqual([]);
-    expect(pruned.sort()).toEqual(['specgraph-src-a-ts.mdc', 'specgraph-src-b-ts.mdc']);
+    expect(pruned.sort()).toEqual(['shanpan-src-a-ts.mdc', 'shanpan-src-b-ts.mdc']);
   });
 });

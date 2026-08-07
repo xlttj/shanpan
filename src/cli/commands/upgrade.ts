@@ -8,7 +8,7 @@ export async function runUpgrade(options: { hooks?: boolean; gitHooks?: boolean 
   const projectDir = process.cwd();
 
   if (!dbExists(projectDir)) {
-    console.error(chalk.red('No SpecGraph database found. Run `specgraph init` first.'));
+    console.error(chalk.red('No Shanpan database found. Run `shanpan init` first.'));
     process.exit(1);
   }
 
@@ -33,7 +33,7 @@ export async function runUpgrade(options: { hooks?: boolean; gitHooks?: boolean 
       if (ide.id === 'opencode') installOpenCodePlugin(projectDir);
       console.log(chalk.green(`✓ Updated agent hooks in ${ide.settingsPath}`));
       if (ide.id === 'opencode') {
-        console.log(chalk.green('✓ Updated OpenCode drift plugin in .opencode/plugin/specgraph-drift.ts'));
+        console.log(chalk.green('✓ Updated OpenCode drift plugin in .opencode/plugin/shanpan-drift.ts'));
       }
     }
     if (selectedIdes.length === 0) {

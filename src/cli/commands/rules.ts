@@ -6,7 +6,7 @@ export async function runRules(): Promise<void> {
   const projectDir = process.cwd();
 
   if (!dbExists(projectDir)) {
-    console.error(chalk.red('No SpecGraph database found. Run `specgraph init` first.'));
+    console.error(chalk.red('No Shanpan database found. Run `shanpan init` first.'));
     process.exitCode = 1;
     return;
   }

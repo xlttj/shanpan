@@ -156,14 +156,14 @@ export async function runContext(): Promise<void> {
 
     // Records carry their claims inline, so the agent needs no follow-up read.
     sections.push(
-      `[specgraph] Known about ${fileList} — read before editing:`,
+      `[shanpan] Known about ${fileList} — read before editing:`,
       ...formatRecords(records),
     );
 
     sections.push(
       '',
       'If your edit would contradict any of the above, surface the conflict before proceeding.',
-      'Before you finish: if you chose between alternatives, hit a trap, or learned something durable, record it (`specgraph records add` or MCP `add_record` then `reindex`). Decisions left only in code or chat are lost between sessions.',
+      'Before you finish: if you chose between alternatives, hit a trap, or learned something durable, record it (`shanpan records add` or MCP `add_record` then `reindex`). Decisions left only in code or chat are lost between sessions.',
     );
 
     const additionalContext = sections.join('\n');

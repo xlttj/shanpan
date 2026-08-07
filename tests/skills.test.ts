@@ -8,7 +8,7 @@ import { SKILLS } from '../src/skills/index.js';
 let tmpDir: string;
 
 beforeEach(() => {
-  tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'specgraph-skills-'));
+  tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'shanpan-skills-'));
 });
 
 afterEach(() => {
@@ -28,17 +28,17 @@ describe('writeSkills', () => {
     writeSkills(tmpDir);
     for (const skill of SKILLS) {
       const content = fs.readFileSync(path.join(skillsBase(), skill.name, 'SKILL.md'), 'utf-8');
-      expect(content).toContain('<!-- specgraph-managed-skill -->');
+      expect(content).toContain('<!-- shanpan-managed-skill -->');
     }
   });
 
-  it('prunes a specgraph-owned skill that is no longer shipped', () => {
+  it('prunes a shanpan-owned skill that is no longer shipped', () => {
     // Simulate a skill left behind by an earlier version.
     const stale = path.join(skillsBase(), 'create-spec');
     fs.mkdirSync(stale, { recursive: true });
     fs.writeFileSync(
       path.join(stale, 'SKILL.md'),
-      '---\nname: create-spec\n---\n# old\n\n<!-- specgraph-managed-skill -->\n',
+      '---\nname: create-spec\n---\n# old\n\n<!-- shanpan-managed-skill -->\n',
     );
 
     writeSkills(tmpDir);

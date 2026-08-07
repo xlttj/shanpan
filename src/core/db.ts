@@ -3,8 +3,42 @@ import path from 'node:path';
 import fs from 'node:fs';
 import { SCHEMA_STATEMENTS, SCHEMA_TABLE_NAMES, SCHEMA_MIGRATIONS, DROP_ORDER, LEGACY_TABLES } from './schema.js';
 
-export const DB_DIR = '.specgraph';
+export const DB_DIR = '.shanpan';
 export const DB_FILE = 'graph.db';
+
+// Pre-rename on-disk names. The product was specgraph before it became shanpan;
+// a repo bootstrapped under the old name keeps its committed knowledge here.
+const LEGACY_DB_DIR = '.specgraph';
+const LEGACY_RC_FILE = '.specgraphrc.json';
+const RC_FILE_NAME = '.shanpanrc.json';
+
+/**
+ * Migrate a pre-shanpan layout in place: rename .specgraph/ -> .shanpan/ and
+ * .specgraphrc.json -> .shanpanrc.json. Renaming rather than rebuilding
+ * preserves the committed knowledge.ndjson byte-for-byte. Only fires when the
+ * new path is absent, so it never clobbers a live layout; idempotent and silent
+ * otherwise, which makes it safe to call on every startup. Without this, a repo
+ * that ran specgraph would look empty under shanpan — the exact "your data is in
+ * the old place" failure the tool is built to avoid.
+ */
+export function migrateLegacyLayout(projectDir: string): void {
+  const pairs: [string, string][] = [
+    [LEGACY_DB_DIR, DB_DIR],
+    [LEGACY_RC_FILE, RC_FILE_NAME],
+  ];
+  for (const [oldName, newName] of pairs) {
+    const oldPath = path.join(projectDir, oldName);
+    const newPath = path.join(projectDir, newName);
+    if (fs.existsSync(oldPath) && !fs.existsSync(newPath)) {
+      try {
+        fs.renameSync(oldPath, newPath);
+      } catch {
+        // A cross-device or permission error must not break the CLI. The tool
+        // then behaves as a fresh install — safe, just unmigrated.
+      }
+    }
+  }
+}
 
 /** Escape a string for safe interpolation into a Cypher single-quoted literal. */
 export function escId(id: string): string {
@@ -20,8 +54,8 @@ export async function openDatabase(
   const dbPath = path.join(dir, DB_FILE);
   // bufferManagerSize and maxDBSize limit the mmap reservation. The native
   // default reserves 8 TB of virtual address space, which exhausts the limit
-  // in constrained environments. Override with SPECGRAPH_MAX_DB_MB env var.
-  const maxMb = parseInt(process.env['SPECGRAPH_MAX_DB_MB'] ?? '256', 10);
+  // in constrained environments. Override with SHANPAN_MAX_DB_MB env var.
+  const maxMb = parseInt(process.env['SHANPAN_MAX_DB_MB'] ?? '256', 10);
   const MAX_DB = (isNaN(maxMb) || maxMb < 16 ? 256 : maxMb) * 1024 * 1024;
   const db = new Database(dbPath, MAX_DB, undefined, readOnly, MAX_DB);
   await db.init();

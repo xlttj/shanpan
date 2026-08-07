@@ -42,16 +42,16 @@ nobody wrote in the diff.
 
 How knowledge reaches you depends on the IDE:
 
-- **Claude Code**: the PreToolUse hook runs "specgraph context" and injects
+- **Claude Code**: the PreToolUse hook runs "shanpan context" and injects
   records for the file being edited. You often get them without calling MCP.
-- **Cursor**: there is no pre-edit injection. "specgraph rules" writes
+- **Cursor**: there is no pre-edit injection. "shanpan rules" writes
   ".cursor/rules/*.mdc" files scoped by globs; Cursor auto-attaches a rule when
   a matching file is in context. Hooks regenerate rules on sessionStart and
   after Write. **Call "get_records_for_symbol" yourself before editing** when
   the file is not yet in context or you need more than the attached rule shows.
 - **OpenCode**: no pre-edit injection and no rules generator. Knowledge is
   MCP-only — always call "get_records_for_symbol" before editing. The
-  specgraph-drift plugin on session.idle surfaces record drift via
+  shanpan-drift plugin on session.idle surfaces record drift via
   check --format opencode; config shell hooks only run analyze and a plain
   check for logging.
 
@@ -163,7 +163,7 @@ add_record kind=source claim="VAT rounding across the EU" ref="docs/tax/vat.md"
 subject="src/tax/Vat.ts" provenance=u
 
 A source pointer can rot — the document moves or dies. Same discipline as any
-record: when you find it moved, supersede it with the new location. specgraph
+record: when you find it moved, supersede it with the new location. shanpan
 never checks URLs and only softly flags a missing local file, so this is on you.
 
 ## Provenance discipline
@@ -177,7 +177,7 @@ downstream trusts it:
 - "g:<sha>", "t:<path>", "n:<path>:<line>", "d:<path>" when it traces to a
   commit, test, code comment, or document.
 
-**A d:/t:/n: pointer must name a file you actually opened.** specgraph rejects
+**A d:/t:/n: pointer must name a file you actually opened.** shanpan rejects
 the record at write time if the path is not on disk — a fabricated or mistyped
 source cannot be saved. If you are reasoning from a document you did not read,
 you have no source: use provenance "i", not a path you are guessing at.
@@ -271,7 +271,7 @@ description: Check whether knowledge records still match the code. Use after ren
 ## Two kinds of drift
 
 **Hard drift** is detected automatically: a record subject no longer resolves to
-any symbol or file. Call "get_record_drift" or run "specgraph check".
+any symbol or file. Call "get_record_drift" or run "shanpan check".
 
 **Soft drift** cannot be detected mechanically: the symbol still exists but the
 claim about it is no longer true. Only you or the user can spot this. It happens
@@ -297,7 +297,7 @@ looking for it. Repeatedly re-investigating a warning that is not reappearing is
 how a session gets stuck in a loop.
 
 The hook also blocks when the knowledge file fails validation. Run
-"specgraph records check" to see the offending lines; the graph is not being
+"shanpan records check" to see the offending lines; the graph is not being
 updated from a file that does not parse.
 
 ## Before finishing a session
@@ -314,7 +314,7 @@ const knowledgeBootstrap: SkillDefinition = {
   name: 'knowledge-bootstrap',
   content: `---
 name: knowledge-bootstrap
-description: Seed an existing project's knowledge base for the first time. Use once, when specgraph has just been added to a codebase that has history but no records yet.
+description: Seed an existing project's knowledge base for the first time. Use once, when shanpan has just been added to a codebase that has history but no records yet.
 ---
 
 # Knowledge Bootstrap
@@ -324,7 +324,7 @@ wiki, caveats in a CONTRIBUTING file, rationale in commit threads, conventions
 only the team knows. Your job is to find where knowledge actually lives in THIS
 project and drive the tools accordingly — not to trust defaults.
 
-The "specgraph bootstrap" command is a deterministic scanner. It reliably reads
+The "shanpan bootstrap" command is a deterministic scanner. It reliably reads
 three mechanical sources — marker comments, git reverts, and structured decision
 docs — but it only looks where you point it. You supply the judgment about where
 that is and what is worth keeping.
@@ -347,11 +347,11 @@ found before writing anything.
 
 ## The process
 
-1. **Run "specgraph analyze" first.** Marker gotchas attach to files and symbols
+1. **Run "shanpan analyze" first.** Marker gotchas attach to files and symbols
    need to exist for later record subjects to resolve.
 
 2. **Dry-run before writing.** Always start with:
-   specgraph bootstrap --dry-run --doc <where-decisions-live> --marker <custom-tag>
+   shanpan bootstrap --dry-run --doc <where-decisions-live> --marker <custom-tag>
    Point --doc at whatever the user told you (a file or a directory, repeatable).
    Add --marker for each project-specific tag. Pass --no-adr if the auto-detected
    ADR directories are wrong for this project.
@@ -376,7 +376,7 @@ found before writing anything.
    of judgment here: use "d:" with a URL-ish pointer, or "u" if the user
    confirmed it in conversation.
 
-7. **Verify.** Run "specgraph records index" then "specgraph check". "check"
+7. **Verify.** Run "shanpan records index" then "shanpan check". "check"
    fails (exit 1) on any record whose provenance cites a file that is not on
    disk — the fabrication net. Resolve those, and any unresolved subjects
    (usually a symbol id that needs "search_symbols" to fix), before you finish.
@@ -392,7 +392,7 @@ knowledge-record skill for the discipline.
 This is where bootstrapping goes wrong at scale: reading a design.md and
 recording claims about code you never opened, with the design doc typed in as
 proof. Do not. A d:/t:/n: provenance must name a file you actually read, and
-specgraph rejects the record if that path is not on disk — so a fabricated
+shanpan rejects the record if that path is not on disk — so a fabricated
 source fails the write, and "check" fails the ones written straight to the file.
 If a design doc describes code you have not verified exists, either record it as
 a "source" ("consult this doc about X") or set provenance "i". Do not launder a

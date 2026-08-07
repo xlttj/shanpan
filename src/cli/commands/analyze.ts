@@ -10,7 +10,7 @@ import { loadAnalyzeState, saveAnalyzeState } from '../../core/analyze-state.js'
 import { watchAndReindex } from '../../core/watcher.js';
 import { readRecords } from '../../core/records.js';
 import { indexRecords } from '../../core/record-indexer.js';
-import type { SpecGraphConfig } from '../../types/config.js';
+import type { ShanpanConfig } from '../../types/config.js';
 
 /** True when the graph holds no code symbols, whatever the state cache claims. */
 async function isGraphEmpty(conn: Parameters<typeof queryAll>[0]): Promise<boolean> {
@@ -61,7 +61,7 @@ function printResults(
 
 async function runOneAnalyze(
   projectDir: string,
-  config: SpecGraphConfig,
+  config: ShanpanConfig,
   verbose: boolean,
   full: boolean,
 ): Promise<{ filesScanned: number }> {
@@ -160,7 +160,7 @@ async function runOneAnalyze(
         );
       }
     } else if (records.length > 0 && errors.length > 0 && verbose) {
-      console.log(chalk.yellow(`  Records skipped — ${errors.length} invalid line(s); run 'specgraph records check'.`));
+      console.log(chalk.yellow(`  Records skipped — ${errors.length} invalid line(s); run 'shanpan records check'.`));
     }
   } finally {
     await closeDatabase(db, conn);
@@ -184,7 +184,7 @@ export async function runAnalyze(options: {
   const projectDir = process.cwd();
 
   if (!dbExists(projectDir)) {
-    console.error(chalk.red('No SpecGraph database found. Run `specgraph init` first.'));
+    console.error(chalk.red('No Shanpan database found. Run `shanpan init` first.'));
     process.exit(1);
   }
 

@@ -7,7 +7,7 @@ import { walkFiles } from '../src/analyzer/walker.js';
 let tmpDir: string;
 
 beforeEach(() => {
-  tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'specgraph-walker-'));
+  tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'shanpan-walker-'));
 });
 
 afterEach(() => {

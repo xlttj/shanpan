@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import chalk from 'chalk';
 import parcelWatcher from '@parcel/watcher';
-import type { SpecGraphConfig } from '../types/config.js';
+import type { ShanpanConfig } from '../types/config.js';
 import { DB_DIR } from './db.js';
 
 const DEBOUNCE_MS = 2000;
@@ -37,7 +37,7 @@ export interface WatchOptions {
  */
 export async function watchAndReindex(
   projectDir: string,
-  config: SpecGraphConfig,
+  config: ShanpanConfig,
   options: WatchOptions,
 ): Promise<() => Promise<void>> {
   try { projectDir = fs.realpathSync(projectDir); } catch { /* keep original */ }

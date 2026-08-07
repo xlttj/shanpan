@@ -6,7 +6,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "specgraph context"
+            "command": "shanpan context"
           }
         ]
       }
@@ -17,7 +17,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "specgraph analyze > /dev/null 2>&1",
+            "command": "shanpan analyze > /dev/null 2>&1",
             "async": true
           }
         ]
@@ -28,7 +28,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "specgraph check --hook-output"
+            "command": "shanpan check --hook-output"
           }
         ]
       }

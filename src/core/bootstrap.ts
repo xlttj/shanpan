@@ -1,7 +1,7 @@
 /**
  * Deterministic extraction of knowledge from an existing codebase.
  *
- * specgraph has no model at runtime, so bootstrap only extracts what can be
+ * shanpan has no model at runtime, so bootstrap only extracts what can be
  * read mechanically and traced to a concrete source. It never infers *why* a
  * decision was made from code alone — that is the one thing no amount of
  * scanning can recover, and a fabricated rationale is worse than a gap.

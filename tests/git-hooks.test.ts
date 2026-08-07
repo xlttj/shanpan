@@ -37,16 +37,16 @@ describe('renderHookFile', () => {
 
   it('appends to a user hook without a managed block, never clobbering it', () => {
     const userHook = '#!/bin/sh\nnpm run lint\n';
-    const out = renderHookFile(userHook, 'specgraph analyze');
+    const out = renderHookFile(userHook, 'shanpan analyze');
     expect(out).toContain('npm run lint'); // user content survives
-    expect(out).toContain('specgraph analyze');
+    expect(out).toContain('shanpan analyze');
     expect(out.indexOf('npm run lint')).toBeLessThan(out.indexOf(HOOK_BEGIN));
   });
 
   it('running twice over a user hook does not duplicate our block', () => {
     const userHook = '#!/bin/sh\nnpm test\n';
-    const once = renderHookFile(userHook, 'specgraph check --staged');
-    const twice = renderHookFile(once, 'specgraph check --staged');
+    const once = renderHookFile(userHook, 'shanpan check --staged');
+    const twice = renderHookFile(once, 'shanpan check --staged');
     expect(twice.split(HOOK_BEGIN)).toHaveLength(2);
     expect(twice).toContain('npm test');
   });
@@ -58,7 +58,7 @@ describe('installGitHooks', () => {
   let tmpDir: string;
 
   beforeEach(() => {
-    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'specgraph-githooks-'));
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'shanpan-githooks-'));
     execFileSync('git', ['init', '-q'], { cwd: tmpDir });
   });
 
@@ -86,7 +86,7 @@ describe('installGitHooks', () => {
   it('pre-commit does not swallow the check exit code, so a violation blocks', () => {
     installGitHooks(tmpDir);
     const body = fs.readFileSync(path.join(tmpDir, '.git', 'hooks', 'pre-commit'), 'utf-8');
-    expect(body).toContain('specgraph check --staged');
+    expect(body).toContain('shanpan check --staged');
     expect(body).not.toContain('check --staged >/dev/null');
     expect(body).not.toMatch(/check --staged.*\|\| true/);
   });
@@ -99,7 +99,7 @@ describe('installGitHooks', () => {
   });
 
   it('returns null outside a git repository', () => {
-    const nonRepo = fs.mkdtempSync(path.join(os.tmpdir(), 'specgraph-nonrepo-'));
+    const nonRepo = fs.mkdtempSync(path.join(os.tmpdir(), 'shanpan-nonrepo-'));
     try {
       expect(installGitHooks(nonRepo)).toBeNull();
     } finally {

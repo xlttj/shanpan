@@ -4,7 +4,7 @@ import path from 'node:path';
 import os from 'node:os';
 import { openDatabase, closeDatabase, ensureSchema, queryAll } from '../src/core/db.js';
 import { analyzeAndIndex } from '../src/analyzer/indexer.js';
-import type { SpecGraphConfig } from '../src/types/config.js';
+import type { ShanpanConfig } from '../src/types/config.js';
 import type { Database, Connection } from '@ladybugdb/core';
 
 // ─── analyzeAndIndex — File nodes, CONTAINS edges, file-level drift (SPEC-011) ─
@@ -14,16 +14,16 @@ describe('analyzeAndIndex', () => {
   let db: Database;
   let conn: Connection;
 
-  function makeConfig(include: string[] = ['src']): SpecGraphConfig {
+  function makeConfig(include: string[] = ['src']): ShanpanConfig {
     return {
       analyze: { include, exclude: ['node_modules'], languages: ['typescript'] },
     };
   }
 
   beforeEach(async () => {
-    projectDir = fs.mkdtempSync(path.join(os.tmpdir(), 'specgraph-analyze-'));
+    projectDir = fs.mkdtempSync(path.join(os.tmpdir(), 'shanpan-analyze-'));
     fs.mkdirSync(path.join(projectDir, 'src'), { recursive: true });
-    fs.mkdirSync(path.join(projectDir, '.specgraph'), { recursive: true });
+    fs.mkdirSync(path.join(projectDir, '.shanpan'), { recursive: true });
     fs.writeFileSync(
       path.join(projectDir, 'src', 'auth.ts'),
       ['export class UserService {', '  signIn(user: string): void {}', '}'].join('\n'),

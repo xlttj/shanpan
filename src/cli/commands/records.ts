@@ -63,7 +63,7 @@ export async function runRecordsIndex(): Promise<void> {
     );
     if (stats.unresolved.length > 0) {
       console.log(
-        chalk.yellow(`\n${stats.unresolved.length} unresolved subject(s) — run 'specgraph analyze' first, or the symbol moved:`),
+        chalk.yellow(`\n${stats.unresolved.length} unresolved subject(s) — run 'shanpan analyze' first, or the symbol moved:`),
       );
       for (const u of stats.unresolved) {
         console.log(chalk.yellow(`  ⚠ ${u.recordId} → ${u.subject}`));

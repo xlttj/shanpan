@@ -10,12 +10,12 @@ import {
   cursorIntegration,
   openCodeIntegration,
 } from '../src/core/ide-hooks.js';
-import { PLUGIN_MARKER } from '../src/opencode/specgraph-drift.plugin.js';
+import { PLUGIN_MARKER } from '../src/opencode/shanpan-drift.plugin.js';
 
 let tmpDir: string;
 
 beforeEach(() => {
-  tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'specgraph-hooks-'));
+  tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'shanpan-hooks-'));
 });
 
 afterEach(() => {
@@ -27,11 +27,11 @@ function readSettings(rel: string): Record<string, unknown> {
 }
 
 describe('installIdeHooks', () => {
-  it('writes the specgraph hooks into a fresh settings file', () => {
+  it('writes the shanpan hooks into a fresh settings file', () => {
     installIdeHooks(tmpDir, claudeCodeIntegration);
     const s = readSettings('.claude/settings.json') as any;
     const cmds = s.hooks.PreToolUse.flatMap((e: any) => e.hooks.map((h: any) => h.command));
-    expect(cmds).toContain('specgraph context');
+    expect(cmds).toContain('shanpan context');
   });
 
   it('is idempotent — running twice does not duplicate hooks', () => {
@@ -47,7 +47,7 @@ describe('installIdeHooks', () => {
     // Simulate the pre-fix state: the same hook entry stacked twice.
     const entry = {
       matcher: 'Write|Edit|MultiEdit',
-      hooks: [{ type: 'command', command: 'specgraph context' }],
+      hooks: [{ type: 'command', command: 'shanpan context' }],
     };
     const filePath = path.join(tmpDir, '.claude', 'settings.json');
     fs.mkdirSync(path.dirname(filePath), { recursive: true });
@@ -96,8 +96,8 @@ describe('cursor integration', () => {
   it('regenerates rules on session start and after edits', () => {
     installIdeHooks(tmpDir, cursorIntegration);
     const s = readSettings('.cursor/hooks.json') as any;
-    expect(s.hooks.sessionStart[0].command).toContain('specgraph rules');
-    expect(s.hooks.postToolUse[0].command).toContain('specgraph rules');
+    expect(s.hooks.sessionStart[0].command).toContain('shanpan rules');
+    expect(s.hooks.postToolUse[0].command).toContain('shanpan rules');
     expect(s.hooks.postToolUse[0].matcher).toBe('Write');
   });
 
@@ -121,8 +121,8 @@ describe('OpenCode integration', () => {
   it('writes opencode.json with experimental shell hooks', () => {
     installIdeHooks(tmpDir, openCodeIntegration);
     const s = readSettings('opencode.json') as any;
-    expect(s.experimental.hook.file_edited[0].command).toEqual(['specgraph', 'analyze']);
-    expect(s.experimental.hook.session_completed[0].command).toEqual(['specgraph', 'check']);
+    expect(s.experimental.hook.file_edited[0].command).toEqual(['shanpan', 'analyze']);
+    expect(s.experimental.hook.session_completed[0].command).toEqual(['shanpan', 'check']);
   });
 
   it('does not use --hook-output on session_completed — config hooks ignore stdout JSON', () => {
@@ -133,7 +133,7 @@ describe('OpenCode integration', () => {
 
   it('installs the drift plugin template', () => {
     installOpenCodePlugin(tmpDir);
-    const pluginPath = path.join(tmpDir, '.opencode/plugin/specgraph-drift.ts');
+    const pluginPath = path.join(tmpDir, '.opencode/plugin/shanpan-drift.ts');
     expect(fs.existsSync(pluginPath)).toBe(true);
     expect(fs.readFileSync(pluginPath, 'utf-8')).toContain(PLUGIN_MARKER);
     expect(fs.readFileSync(pluginPath, 'utf-8')).toContain('session.idle');
@@ -149,7 +149,7 @@ describe('OpenCode integration', () => {
 });
 
 describe('mergeSettings', () => {
-  it('preserves a user hook that differs from the specgraph one', () => {
+  it('preserves a user hook that differs from the shanpan one', () => {
     const filePath = path.join(tmpDir, 'settings.json');
     const userEntry = {
       matcher: 'Write',
@@ -160,7 +160,7 @@ describe('mergeSettings', () => {
     mergeSettings(filePath, {
       hooks: {
         PreToolUse: [
-          { matcher: 'Write|Edit|MultiEdit', hooks: [{ type: 'command', command: 'specgraph context' }] },
+          { matcher: 'Write|Edit|MultiEdit', hooks: [{ type: 'command', command: 'shanpan context' }] },
         ],
       },
     });
@@ -168,7 +168,7 @@ describe('mergeSettings', () => {
     const merged = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
     const cmds = merged.hooks.PreToolUse.flatMap((e: any) => e.hooks.map((h: any) => h.command));
     expect(cmds).toContain('my-own-linter');
-    expect(cmds).toContain('specgraph context');
+    expect(cmds).toContain('shanpan context');
     expect(merged.hooks.PreToolUse).toHaveLength(2);
   });
 
