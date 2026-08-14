@@ -1,0 +1,345 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Shanpan — a living graph of your code</title>
+<meta name="description" content="Shanpan parses your codebase into a queryable graph and welds documentation and decisions onto it — from the whole module down to a single method.">
+<style>
+  :root {
+    --bg:        #efe3ca;
+    --bg-deep:   #e6d4b3;
+    --ink:       #3b3024;
+    --ink-soft:  #5e4c37;
+    --accent:    #8a5a2b;
+    --accent-deep:#6a4320;
+    --rule:      #cbb389;
+    --card:      #f7f0df;
+    --card-edge: #dcc59c;
+    --shadow:    rgba(74,54,30,0.16);
+  }
+
+  * { box-sizing: border-box; }
+
+  html { -webkit-text-size-adjust: 100%; scroll-behavior: smooth; }
+
+  body {
+    margin: 0;
+    color: var(--ink);
+    background:
+      radial-gradient(1200px 600px at 50% -10%, #f6ecd6 0%, rgba(246,236,214,0) 60%),
+      linear-gradient(180deg, #f0e6ce 0%, #e8d8ba 100%);
+    background-attachment: fixed;
+    font-family: "Iowan Old Style", "Palatino Linotype", Palatino, "Book Antiqua", Georgia, serif;
+    font-size: 19px;
+    line-height: 1.65;
+    letter-spacing: 0.1px;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .wrap { max-width: 820px; margin: 0 auto; padding: 0 26px; }
+
+  /* faint aged-paper vignette at edges */
+  body::before {
+    content: "";
+    position: fixed; inset: 0; pointer-events: none; z-index: 0;
+    box-shadow: inset 0 0 220px rgba(90,64,32,0.14);
+  }
+  .wrap { position: relative; z-index: 1; }
+
+  /* ── hero ─────────────────────────────────────────────── */
+  header { padding: 20vh 0 12vh; text-align: center; }
+
+  .kicker {
+    text-transform: uppercase;
+    letter-spacing: 0.42em;
+    font-size: 0.72rem;
+    color: var(--accent);
+    margin: 0 0 1.6rem;
+    padding-left: 0.42em;
+  }
+
+  h1 {
+    font-size: clamp(3.2rem, 11vw, 5.6rem);
+    line-height: 0.98;
+    margin: 0 0 1.3rem;
+    font-weight: 600;
+    letter-spacing: -0.01em;
+    color: var(--accent-deep);
+  }
+  h1 .glyph {
+    display: block;
+    font-size: 0.32em;
+    letter-spacing: 0.5em;
+    color: var(--accent);
+    opacity: 0.7;
+    margin-bottom: 0.6rem;
+    padding-left: 0.5em;
+  }
+
+  .tagline {
+    font-size: clamp(1.25rem, 3.4vw, 1.7rem);
+    font-style: italic;
+    color: var(--ink-soft);
+    max-width: 22ch;
+    margin: 0 auto 2.2rem;
+    line-height: 1.35;
+  }
+
+  .lede {
+    font-size: 1.12rem;
+    color: var(--ink);
+    max-width: 60ch;
+    margin: 0 auto;
+  }
+
+  .scroll-hint {
+    margin-top: 4.5rem;
+    color: var(--accent);
+    font-size: 0.8rem;
+    letter-spacing: 0.3em;
+    text-transform: uppercase;
+    animation: bob 2.4s ease-in-out infinite;
+  }
+  @keyframes bob { 0%,100%{ transform: translateY(0); opacity:.55 } 50%{ transform: translateY(7px); opacity:1 } }
+
+  /* ── section blocks ───────────────────────────────────── */
+  section { padding: 4.5vh 0; }
+
+  .block { max-width: 62ch; }
+  .block.right { margin-left: auto; text-align: left; }
+
+  h2 {
+    font-size: clamp(1.5rem, 4vw, 2.05rem);
+    line-height: 1.15;
+    margin: 0 0 0.7rem;
+    color: var(--accent-deep);
+    font-weight: 600;
+  }
+
+  .block p { margin: 0 0 1rem; color: var(--ink); }
+  .block p:last-child { margin-bottom: 0; }
+  .block em { color: var(--accent-deep); font-style: italic; }
+  .block strong { color: var(--accent-deep); font-weight: 600; }
+
+  /* the hook — a highlighted card */
+  .feature {
+    background: var(--card);
+    border: 1px solid var(--card-edge);
+    border-left: 5px solid var(--accent);
+    border-radius: 3px;
+    padding: 2rem 2.1rem;
+    box-shadow: 0 18px 40px -24px var(--shadow);
+    max-width: 66ch;
+  }
+  .feature.right { margin-left: auto; }
+
+  /* dividers */
+  .rule {
+    width: 100%; height: 0; border: 0;
+    border-top: 1px solid var(--rule);
+    max-width: 120px; margin: 2vh 0;
+    opacity: 0.8;
+  }
+  .rule.center { margin-left: auto; margin-right: auto; }
+
+  /* ── name / why ───────────────────────────────────────── */
+  .why {
+    text-align: center;
+    padding: 9vh 0;
+    max-width: 54ch;
+    margin: 0 auto;
+  }
+  .why .chars {
+    font-size: clamp(2.4rem, 8vw, 3.4rem);
+    color: var(--accent);
+    letter-spacing: 0.12em;
+    margin-bottom: 1.2rem;
+    opacity: 0.85;
+  }
+  .why h2 { margin-bottom: 1rem; }
+  .why p { font-style: italic; color: var(--ink-soft); font-size: 1.12rem; }
+
+  /* ── cta ──────────────────────────────────────────────── */
+  .cta { text-align: center; padding: 8vh 0 14vh; }
+  .cta h2 { font-size: clamp(1.9rem, 5vw, 2.6rem); }
+  .cta p { color: var(--ink-soft); max-width: 44ch; margin: 0 auto 2.4rem; }
+
+  .buttons { display: flex; gap: 0.9rem; justify-content: center; flex-wrap: wrap; }
+  .btn {
+    display: inline-block;
+    padding: 0.78rem 1.6rem;
+    border: 1.5px solid var(--accent);
+    border-radius: 3px;
+    color: var(--accent-deep);
+    text-decoration: none;
+    font-size: 0.98rem;
+    letter-spacing: 0.03em;
+    transition: background .25s ease, color .25s ease, transform .25s ease;
+  }
+  .btn:hover { background: var(--accent); color: #f7f0df; transform: translateY(-2px); }
+  .btn.solid { background: var(--accent); color: #f7f0df; }
+  .btn.solid:hover { background: var(--accent-deep); border-color: var(--accent-deep); }
+
+  footer {
+    text-align: center;
+    padding: 3vh 0 6vh;
+    color: var(--ink-soft);
+    font-size: 0.82rem;
+    letter-spacing: 0.04em;
+  }
+
+  /* ── reveal-on-scroll (progressive enhancement) ───────── */
+  .js .reveal {
+    opacity: 0;
+    transform: translateY(28px);
+    transition: opacity .8s ease, transform .85s cubic-bezier(.2,.75,.2,1);
+    will-change: opacity, transform;
+  }
+  .js .reveal.left  { transform: translateX(-70px); }
+  .js .reveal.right { transform: translateX(70px); }
+  .js .reveal.visible { opacity: 1; transform: none; }
+
+  @media (prefers-reduced-motion: reduce) {
+    html { scroll-behavior: auto; }
+    .js .reveal { opacity: 1 !important; transform: none !important; transition: none; }
+    .scroll-hint { animation: none; }
+  }
+
+  @media (max-width: 620px) {
+    body { font-size: 18px; }
+    .feature { padding: 1.5rem 1.4rem; }
+    header { padding: 14vh 0 9vh; }
+  }
+</style>
+</head>
+<body>
+<script>document.documentElement.classList.add('js');</script>
+
+<div class="wrap">
+
+  <header>
+    <p class="kicker reveal">Code knowledge, structured</p>
+    <h1 class="reveal"><span class="glyph">算盘</span>Shanpan</h1>
+    <p class="tagline reveal">A living graph of your code — with the knowledge welded to every node.</p>
+    <p class="lede reveal">Shanpan parses your codebase into a graph: every file, class, and method, and the calls between them. Then it ties documentation, decisions, and hard-won lessons directly onto that graph — from the whole module down to a single method. Your AI agent doesn't get a pile of notes. It gets the right knowledge, attached to the exact code it's touching.</p>
+    <p class="scroll-hint reveal">scroll</p>
+  </header>
+
+  <section>
+    <div class="block reveal left">
+      <h2>A live map of your code</h2>
+      <p>Shanpan builds a graph of your symbols and the relationships between them — who calls what, what contains what, what depends on what. It's queryable. Your agent can ask "who calls this method," "what breaks if I change this signature," "what's the blast radius" — and get a precise answer instead of grepping and guessing.</p>
+    </div>
+  </section>
+
+  <section>
+    <div class="block right reveal right">
+      <h2>Knowledge welded to the graph</h2>
+      <p>Every trap, invariant, and decision is a record anchored to a node in that graph — a method, a class, a file, a directory. It's not documentation sitting in a folder hoping someone reads it. It's structural: the knowledge <em>is</em> attached to the code it describes.</p>
+    </div>
+  </section>
+
+  <section>
+    <div class="feature reveal left">
+      <h2>From the whole module down to a single method</h2>
+      <p>This is the part that changes everything. Knowledge attaches at any level and <strong>inherits downward</strong>. A rule pinned to a module applies to every file beneath it. A constraint on a class reaches all its methods. Edit one method, and you see its own notes <em>plus</em> everything inherited from its class, its file, and its module — most specific first.</p>
+      <p>Write "this bounded context must stay idempotent" once, at the directory. Every method in the subtree inherits it, automatically, forever.</p>
+    </div>
+  </section>
+
+  <section>
+    <div class="block right reveal right">
+      <h2>Ask the graph, not the whole repo</h2>
+      <p>Because knowledge lives on the graph, retrieval is exact. When your agent edits a file, the relevant records are injected before the first change — scoped to that file's place in the tree. No searching. No stuffing the entire knowledge base into context and hoping the model finds the right line.</p>
+    </div>
+  </section>
+
+  <hr class="rule reveal">
+
+  <section>
+    <div class="block reveal left">
+      <h2>Every claim carries its source</h2>
+      <p>A memory you can't trust is worse than none. Every record names where it came from — the user, a commit, a test, a document, or an agent's own observation — and weak inferences are marked as weak.</p>
+      <p>Fabrication fails by construction: if a record cites a source file, that file has to exist, or the record is rejected before it's ever saved. No made-up citations.</p>
+    </div>
+  </section>
+
+  <section>
+    <div class="block right reveal right">
+      <h2>Stays honest as the code moves</h2>
+      <p>The graph is rebuilt as your code changes. Rename, move, or delete a symbol, and Shanpan sees that a record no longer points at anything real and flags the drift. Knowledge doesn't quietly rot into confident, wrong advice.</p>
+    </div>
+  </section>
+
+  <section>
+    <div class="block reveal left">
+      <h2>It lives in your repository</h2>
+      <p>The knowledge layer is plain text, committed alongside your code. It travels with the repo, reviews in pull requests, and merges cleanly across branches. No external service to sync. Clone the repo, and both the code and its knowledge come with it — the graph rebuilds locally in seconds.</p>
+    </div>
+  </section>
+
+  <section>
+    <div class="block right reveal right">
+      <h2>Records what was tried — and rejected</h2>
+      <p>The most valuable thing lost between sessions is the road not taken. Shanpan keeps rejected approaches as first-class records on the graph, so no one re-proposes the idea that was already ruled out for reasons nobody wrote in the commit.</p>
+    </div>
+  </section>
+
+  <section>
+    <div class="block reveal left">
+      <h2>Works where you already work</h2>
+      <p>Shanpan plugs into Claude Code, Cursor, and OpenCode — through automatic injection, editor rules, or direct graph queries over MCP. One graph, one source of truth, every tool.</p>
+    </div>
+  </section>
+
+  <section>
+    <div class="block right reveal right">
+      <h2>Start on a codebase that already has history</h2>
+      <p>Point Shanpan at an existing project and it seeds the graph and an initial knowledge layer from what's already there — decision docs, marker comments, reverted commits. You don't start from an empty page.</p>
+    </div>
+  </section>
+
+  <hr class="rule center reveal">
+
+  <section class="why reveal">
+    <div class="chars">算盘 · シャンパン</div>
+    <h2>Why "Shanpan"?</h2>
+    <p>算盘 — the abacus, a device for reckoning. And シャンパン — champagne, as in <em>drinking your own champagne</em>, the classier take on eating your own dog food. A tool built by using it on itself, named for the practice that shaped it.</p>
+  </section>
+
+  <section class="cta reveal">
+    <h2>Give your codebase a graph that remembers</h2>
+    <p>Install the CLI, point your agent at it, and stop losing what you learn.</p>
+    <div class="buttons">
+      <a class="btn solid" href="#">Get started</a>
+      <a class="btn" href="#">Read the docs</a>
+      <a class="btn" href="#">View on GitHub</a>
+    </div>
+  </section>
+
+  <footer>Shanpan · a code knowledge graph for AI-assisted development</footer>
+
+</div>
+
+<script>
+  (function () {
+    var reduce = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    var targets = document.querySelectorAll('.reveal');
+    if (reduce || !('IntersectionObserver' in window)) {
+      targets.forEach(function (el) { el.classList.add('visible'); });
+      return;
+    }
+    var io = new IntersectionObserver(function (entries) {
+      entries.forEach(function (e) {
+        if (e.isIntersecting) {
+          e.target.classList.add('visible');
+          io.unobserve(e.target);
+        }
+      });
+    }, { threshold: 0.18, rootMargin: '0px 0px -8% 0px' });
+    targets.forEach(function (el) { io.observe(el); });
+  })();
+</script>
+</body>
+</html>
