@@ -90,6 +90,20 @@ async function insertFiles(
   return inserted;
 }
 
+/**
+ * Collapse symbols sharing an id (same file::fqn) to one, keeping the last.
+ * The CodeSymbol id is a primary key, so a duplicate aborts the whole insert —
+ * and duplicates are normal in real code: @overload stubs in Python, function
+ * overload signatures and declaration merging in TypeScript, conditional
+ * redefinitions under `if TYPE_CHECKING`. Keeping the last favours the actual
+ * implementation, which follows its stubs.
+ */
+function dedupeById(symbols: CodeSymbol[]): CodeSymbol[] {
+  const byId = new Map<string, CodeSymbol>();
+  for (const s of symbols) byId.set(s.id, s);
+  return [...byId.values()];
+}
+
 async function insertSymbols(
   conn: Connection,
   symbols: CodeSymbol[],
@@ -341,22 +355,23 @@ export async function analyzeAndIndex(
     parseErrors: workerParseErrors,
     scannedFiles,
   } = await parseWithWorkers(fileTasks, onProgress ? (n, t) => onProgress('scan', n, t) : undefined);
-  stats.symbolsFound = allSymbols.length;
+  const symbols = dedupeById(allSymbols);
+  stats.symbolsFound = symbols.length;
   stats.parseErrors = workerParseErrors;
 
   // Phase 2 — clear and write
   await runQuery(conn, 'MATCH (c:CodeSymbol) DETACH DELETE c');
   await runQuery(conn, 'MATCH (f:File) DETACH DELETE f');
 
-  const totalNodes = scannedFiles.size + allSymbols.length;
+  const totalNodes = scannedFiles.size + symbols.length;
 
   stats.fileNodesCreated = await insertFiles(conn, scannedFiles, onProgress ? (n, t) => onProgress('index', n, t) : undefined, 0, totalNodes);
-  await insertSymbols(conn, allSymbols, onProgress ? (n, t) => onProgress('index', n, t) : undefined, scannedFiles.size, totalNodes);
+  await insertSymbols(conn, symbols, onProgress ? (n, t) => onProgress('index', n, t) : undefined, scannedFiles.size, totalNodes);
 
-  const containsPairs = buildContainsPairs(allSymbols);
+  const containsPairs = buildContainsPairs(symbols);
   stats.containsEdgesCreated = await insertContainsEdges(conn, containsPairs);
 
-  stats.callEdgesCreated = await insertCallsEdges(conn, allCallRefs, allSymbols);
+  stats.callEdgesCreated = await insertCallsEdges(conn, allCallRefs, symbols);
 
 
   return stats;
@@ -400,15 +415,16 @@ export async function analyzeAndIndexIncremental(
     parseErrors: workerParseErrors,
     scannedFiles: newFiles,
   } = await parseWithWorkers(fileTasks, onProgress ? (n, t) => onProgress('scan', n, t) : undefined);
-  stats.symbolsFound = newSymbols.length;
+  const symbols = dedupeById(newSymbols);
+  stats.symbolsFound = symbols.length;
   stats.parseErrors = workerParseErrors;
 
-  const totalNodes = newFiles.size + newSymbols.length;
+  const totalNodes = newFiles.size + symbols.length;
   if (totalNodes > 0) {
     stats.fileNodesCreated = await insertFiles(conn, newFiles, onProgress ? (n, t) => onProgress('index', n, t) : undefined, 0, totalNodes);
-    await insertSymbols(conn, newSymbols, onProgress ? (n, t) => onProgress('index', n, t) : undefined, newFiles.size, totalNodes);
+    await insertSymbols(conn, symbols, onProgress ? (n, t) => onProgress('index', n, t) : undefined, newFiles.size, totalNodes);
 
-    const containsPairs = buildContainsPairs(newSymbols);
+    const containsPairs = buildContainsPairs(symbols);
     stats.containsEdgesCreated = await insertContainsEdges(conn, containsPairs);
 
     // Query existing symbols for cross-file CALLS resolution
@@ -425,7 +441,7 @@ export async function analyzeAndIndexIncremental(
       lineEnd: Number(r['lineEnd']),
       language: String(r['language']),
     }));
-    const allCurrentSymbols = [...existingSymbols, ...newSymbols];
+    const allCurrentSymbols = [...existingSymbols, ...symbols];
 
     stats.callEdgesCreated = await insertCallsEdges(conn, newCallRefs, allCurrentSymbols);
   }

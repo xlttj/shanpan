@@ -70,5 +70,33 @@ describe('analyzeAndIndex', () => {
     expect(stats.containsEdgesCreated).toBeGreaterThanOrEqual(2);
   });
 
-
+  // Regression: @overload (and TS overloads / declaration merging) produce
+  // several symbols sharing one id. The id is a PRIMARY KEY, so without dedup
+  // the insert aborts with a duplicate-key violation — as it did on the real
+  // `rich` codebase (rich/containers.py::Lines.__getitem__).
+  it('collapses duplicate symbol ids from @overload instead of crashing', async () => {
+    fs.writeFileSync(
+      path.join(projectDir, 'src', 'over.py'),
+      [
+        'from typing import overload',
+        'class Box:',
+        '    @overload',
+        '    def get(self, i: int) -> int: ...',
+        '    @overload',
+        '    def get(self, i: str) -> str: ...',
+        '    def get(self, i):',
+        '        return i',
+      ].join('\n'),
+    );
+    const config: ShanpanConfig = {
+      analyze: { include: ['src'], exclude: ['node_modules'], languages: ['typescript', 'python'] },
+    };
+    const stats = await analyzeAndIndex(conn, projectDir, config);
+    expect(stats.parseErrors).toBe(0);
+    const { rows } = await queryAll(
+      conn,
+      `MATCH (c:CodeSymbol) WHERE c.fqn = 'Box.get' RETURN count(*) AS n`,
+    );
+    expect(Number(rows[0]?.['n'])).toBe(1);
+  });
 });
