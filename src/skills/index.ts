@@ -239,10 +239,10 @@ to nothing shows up as drift — check the ID with "search_symbols" if unsure.
 
 ## Anchoring: symbol, file, or directory
 
-A subject can be a symbol ("src/a.ts::Foo.bar"), a file ("src/a.ts"), or a
-**directory** ("apps/bmf/src"). A directory anchor applies to that directory and
-everything beneath it, recursively — so editing any file in the subtree surfaces
-the record.
+A subject can be a symbol ("src/cart.ts::Cart.total"), a file ("app/handlers.py"),
+or a **directory** ("src/billing"). A directory anchor applies to that directory
+and everything beneath it, recursively — so editing any file in the subtree
+surfaces the record.
 
 **Choose the most specific anchor that is still true.** A trap in one function
 anchors at the symbol. A rule for one file anchors at the file. Anchor at a
@@ -254,12 +254,12 @@ But "true" is not enough — the subject must be what the claim is **about**:
 - **Anchor to what the claim is about, not what it sits near.** The subject is
   the code the claim constrains or describes — the place where, mid-edit, you
   would want this warning to fire. A gotcha about running the test suite is not
-  "about" the composer.json files that happen to define the projects; anchored
-  there it never surfaces when someone actually runs tests. If editing the
-  subject would not be the moment this record should appear, it is the wrong
-  subject.
+  "about" the package manifests (package.json, pyproject.toml, composer.json)
+  that happen to define the projects; anchored there it never surfaces when
+  someone actually runs tests. If editing the subject would not be the moment
+  this record should appear, it is the wrong subject.
 - **Repeated siblings are a parent in disguise.** If you are listing three
-  "composer.json" (one per app) because the claim holds for all of them, the
+  package manifests (one per app) because the claim holds for all of them, the
   claim belongs to their shared module or root — anchor once, higher, not once
   per leaf.
 - **Workflow knowledge rarely maps to a file's contents.** How to run tests,
@@ -425,12 +425,12 @@ bootstrap. Slow down on provenance.
 
 ## Anchor module rules at the module, not a stand-in file
 
-Much bootstrapped knowledge is module-wide ("this bounded context does X"). Do
+Much bootstrapped knowledge is module-wide ("this whole module does X"). Do
 not pin such a rule to one representative class — anchor it at the module
-directory (e.g. "apps/bmf/src/Infrastructure/Consumers"), which applies to the
-whole subtree and surfaces for every file in it. Anchor at a concrete symbol or
-file when the rule is that local, and never above the module root. See the
-knowledge-record skill's anchoring section.
+directory (e.g. "src/billing/handlers"), which applies to the whole subtree and
+surfaces for every file in it. Anchor at a concrete symbol or file when the rule
+is that local, and never above the module root. See the knowledge-record skill's
+anchoring section.
 
 ## This runs once
 
