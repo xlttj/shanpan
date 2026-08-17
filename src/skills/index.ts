@@ -249,6 +249,26 @@ anchors at the symbol. A rule for one file anchors at the file. Anchor at a
 directory only for a rule that genuinely spans the whole module — "every
 consumer in this directory must be idempotent", not "this one class does X".
 
+But "true" is not enough — the subject must be what the claim is **about**:
+
+- **Anchor to what the claim is about, not what it sits near.** The subject is
+  the code the claim constrains or describes — the place where, mid-edit, you
+  would want this warning to fire. A gotcha about running the test suite is not
+  "about" the composer.json files that happen to define the projects; anchored
+  there it never surfaces when someone actually runs tests. If editing the
+  subject would not be the moment this record should appear, it is the wrong
+  subject.
+- **Repeated siblings are a parent in disguise.** If you are listing three
+  "composer.json" (one per app) because the claim holds for all of them, the
+  claim belongs to their shared module or root — anchor once, higher, not once
+  per leaf.
+- **Workflow knowledge rarely maps to a file's contents.** How to run tests,
+  build, or toggle tooling is about a task, not a file. Anchor it at the
+  directory whose work it governs (the test-tooling directory, say) — not a
+  scatter of config leaves, and not the whole repo. If no directory fits, keep
+  the subject to that work area and let "search_records" find it; that beats
+  over-pinning it to an incidental file you happened to have open.
+
 Two cautions:
 - **Do not anchor above the module.** A subject like "apps" or "src" injects for
   every edit in a huge tree — noise that trains agents to ignore records. Anchor
