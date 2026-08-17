@@ -51,7 +51,7 @@ program
   .description('Scan source files and extract code symbols and call edges')
   .option('--include <dirs...>', 'Directories to scan (overrides config)')
   .option('--exclude <dirs...>', 'Directory names to skip (overrides config)')
-  .option('--languages <langs...>', 'Languages to parse: typescript, php (overrides config)')
+  .option('--languages <langs...>', 'Languages to parse: typescript, php, python, sql (overrides config)')
   .option('--watch', 'Keep running and re-analyze on file changes (2s debounce)')
   .option('--full', 'Force a full rebuild, ignoring the incremental state cache')
   .action((opts) =>

@@ -2,15 +2,16 @@ import type { LanguageParser } from './parser.js';
 import { TypeScriptParser } from './typescript.js';
 import { PhpParser } from './php.js';
 import { SqlParser } from './sql.js';
+import { PythonParser } from './python.js';
 
 export type { LanguageParser };
-export { TypeScriptParser, PhpParser, SqlParser };
+export { TypeScriptParser, PhpParser, SqlParser, PythonParser };
 
 let _parsers: LanguageParser[] | null = null;
 
 function getParsers(): LanguageParser[] {
   if (_parsers === null) {
-    _parsers = [new TypeScriptParser(), new PhpParser(), new SqlParser()];
+    _parsers = [new TypeScriptParser(), new PhpParser(), new SqlParser(), new PythonParser()];
   }
   return _parsers;
 }
