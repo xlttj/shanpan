@@ -20,6 +20,7 @@ import {
 import { indexRecords } from '../../core/record-indexer.js';
 import { ancestorDirs } from '../../core/dir-scope.js';
 import { KIND_PRIORITY } from '../../core/record-format.js';
+import { currentBuildId, readAnalyzerBuild, detectSkew } from '../../core/build-info.js';
 import { RECORD_KINDS, type KnowledgeRecord, type RecordKind } from '../../types/record.js';
 
 const MUTATING_KEYWORDS = /^\s*(CREATE|MERGE|SET|DELETE|REMOVE|DROP|ALTER|CALL)\b/i;
@@ -57,7 +58,45 @@ export function diagnoseError(err: unknown): { content: { type: 'text'; text: st
         '(or call the reindex tool), which recreates the graph against the current schema.',
     );
   }
-  return textResult(`shanpan error: ${msg}`);
+  return textResult(
+    `shanpan error: ${msg}. If a feature you expected seems missing, call get_server_info — ` +
+      'a long-lived MCP server may be running older code than the CLI that built the graph.',
+  );
+}
+
+/**
+ * Report the running server's build against the one that built the graph, plus
+ * node counts. An agent (or human) calls this when a feature seems missing or
+ * results look stale — the usual cause is a long-lived MCP server still running
+ * pre-update code after the CLI and graph moved on.
+ */
+export async function handleServerInfo(
+  projectDir: string,
+  serverBuild: string,
+): Promise<{ content: { type: 'text'; text: string }[] }> {
+  const skew = detectSkew(serverBuild, readAnalyzerBuild(projectDir));
+  let symbols: number | null = null;
+  let records: number | null = null;
+  if (dbExists(projectDir)) {
+    const { db, conn } = await openDatabase(projectDir, true);
+    try {
+      const s = await queryAll(conn, 'MATCH (c:CodeSymbol) RETURN count(c) AS n');
+      symbols = Number(s.rows[0]?.['n'] ?? 0);
+      const r = await queryAll(conn, 'MATCH (r:Record) RETURN count(r) AS n');
+      records = Number(r.rows[0]?.['n'] ?? 0);
+    } finally {
+      await closeDatabase(db, conn);
+    }
+  }
+  return jsonResult({
+    version: '0.1.0',
+    server_build: skew.serverBuild,
+    graph_build: skew.graphBuild,
+    in_sync: skew.inSync,
+    symbols,
+    records,
+    advice: skew.advice,
+  });
 }
 
 /** True when knowledge.ndjson holds records the graph does not have indexed. */
@@ -110,11 +149,26 @@ export async function handleGetCallers(
        RETURN DISTINCT c.id AS id, c.fqn AS fqn,
                        c.file_path AS file_path, c.symbol_type AS symbol_type`,
     );
+    if (rows.length === 0) return noCallersResult('callers');
     rows.sort((a, b) => String(a['id']).localeCompare(String(b['id'])));
     return jsonResult(rows);
   } finally {
     await closeDatabase(db, conn);
   }
+}
+
+/**
+ * An empty caller/callee list is ambiguous — "nothing calls this" or "the
+ * analyzer does not see the call". Say which so an agent does not read a
+ * framework-driven method (a Symfony kernel.reset listener, say) as dead code.
+ */
+function noCallersResult(kind: 'callers' | 'callees'): { content: { type: 'text'; text: string }[] } {
+  const what = kind === 'callers' ? 'in-repo static callers' : 'resolved outgoing calls';
+  return textResult(
+    `No ${what}. This does not mean the symbol has none — vendor calls and ` +
+      'container-tag / framework dispatch (e.g. Symfony kernel.reset) are not indexed, ' +
+      'and static:: / dynamic calls are not resolved.',
+  );
 }
 
 export async function handleGetCallees(
@@ -129,6 +183,7 @@ export async function handleGetCallees(
        RETURN DISTINCT c.id AS id, c.fqn AS fqn,
                        c.file_path AS file_path, c.symbol_type AS symbol_type`,
     );
+    if (rows.length === 0) return noCallersResult('callees');
     rows.sort((a, b) => String(a['id']).localeCompare(String(b['id'])));
     return jsonResult(rows);
   } finally {
@@ -557,6 +612,9 @@ export async function runMcp(options: { projectDir?: string } = {}): Promise<voi
   const projectDir = options.projectDir ? path.resolve(options.projectDir) : process.cwd();
   // A repo bootstrapped under the old name must not read as empty here.
   migrateLegacyLayout(projectDir);
+  // Captured once at startup: the build this server is actually running, even
+  // after a rebuild overwrites the file on disk.
+  const serverBuild = currentBuildId();
 
   const server = new Server(
     { name: 'shanpan', version: '0.1.0' },
@@ -602,9 +660,15 @@ export async function runMcp(options: { projectDir?: string } = {}): Promise<voi
         inputSchema: { type: 'object', properties: {} },
       },
       {
+        name: 'get_server_info',
+        description:
+          'Report the running server build, the build that last analyzed the graph, whether they match, and node counts. Call this when a feature seems missing or results look stale — a long-lived MCP server can keep serving pre-update code until it is restarted.',
+        inputSchema: { type: 'object', properties: {} },
+      },
+      {
         name: 'get_callers',
         description:
-          'List code symbols that directly call the given symbol (1-hop incoming CALLS edges).',
+          'List code symbols that directly call the given symbol (1-hop incoming CALLS edges). Pass a method id ("file::Class.method"); a class id returns its instantiation sites (new/constructor callers), not method callers. Empty means no in-repo static caller — vendor and container-tag calls (e.g. Symfony kernel.reset) are not indexed. static:: and dynamic calls are not resolved.',
         inputSchema: {
           type: 'object',
           properties: {
@@ -616,7 +680,7 @@ export async function runMcp(options: { projectDir?: string } = {}): Promise<voi
       {
         name: 'get_callees',
         description:
-          'List code symbols that the given symbol directly calls (1-hop outgoing CALLS edges).',
+          'List code symbols that the given symbol directly calls (1-hop outgoing CALLS edges). Resolves $this->prop->m() by property type and $this->m()/parent::m() through the class hierarchy; static:: and vendor calls are not resolved.',
         inputSchema: {
           type: 'object',
           properties: {
@@ -849,6 +913,10 @@ export async function runMcp(options: { projectDir?: string } = {}): Promise<voi
       }
     }
 
+
+    if (name === 'get_server_info') {
+      return await handleServerInfo(projectDir, serverBuild);
+    }
 
     if (name === 'get_callers') {
       return await handleGetCallers(projectDir, String(a['symbolId'] ?? ''));

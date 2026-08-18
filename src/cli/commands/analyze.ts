@@ -7,6 +7,7 @@ import { analyzeAndIndex, analyzeAndIndexIncremental } from '../../analyzer/inde
 import { walkFiles } from '../../analyzer/walker.js';
 import { getExtensionsForLanguages } from '../../analyzer/languages/index.js';
 import { loadAnalyzeState, saveAnalyzeState } from '../../core/analyze-state.js';
+import { currentBuildId, writeAnalyzerBuild } from '../../core/build-info.js';
 import { watchAndReindex } from '../../core/watcher.js';
 import { readRecords } from '../../core/records.js';
 import { indexRecords } from '../../core/record-indexer.js';
@@ -174,6 +175,9 @@ async function runOneAnalyze(
   if (mode !== 'skip') {
     saveAnalyzeState(projectDir, { fileMtimes: currentMtimes });
   }
+  // Stamp which binary built this graph, so an MCP server can detect that it is
+  // running older code than the one that last analyzed.
+  writeAnalyzerBuild(projectDir, currentBuildId());
 
   return { filesScanned: stats.filesScanned };
 }

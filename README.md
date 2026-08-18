@@ -74,5 +74,8 @@ Add the following to your MCP client's server configuration. `--project-dir` mus
 | `get_callers_transitive` | incoming | BFS up to 10 | all entry points that lead to this symbol |
 | `get_impact` | outgoing | BFS up to 10 | blast radius — all code affected by changing this symbol |
 
+**Diagnostics**
+`get_server_info` — report the running server build vs. the build that last analyzed the graph, whether they match, and node counts. Call it when a feature seems missing or results look stale: a long-lived MCP server can serve pre-update code until it is restarted.
+
 **Escape hatch**
 `query_graph` — execute any read-only Cypher query directly against the graph.

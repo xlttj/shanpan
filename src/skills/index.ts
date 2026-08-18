@@ -269,6 +269,10 @@ But "true" is not enough — the subject must be what the claim is **about**:
   scatter of config leaves, and not the whole repo. If no directory fits, keep
   the subject to that work area and let "search_records" find it; that beats
   over-pinning it to an incidental file you happened to have open.
+- **Anchor to the enforcer, not only the obeyer.** A rule about how something
+  must behave belongs on the code that enforces it — the listener, the guard,
+  the middleware — not only on the classes expected to comply. The agent who
+  breaks the rule is editing the enforcer, so that is where the record must fire.
 
 Two cautions:
 - **Do not anchor above the module.** A subject like "apps" or "src" injects for

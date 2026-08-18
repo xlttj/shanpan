@@ -221,10 +221,11 @@ describe('call-graph handlers', () => {
     expect(ids).toEqual(['src/f.ts::a', 'src/f.ts::d']);
   });
 
-  it('get_callers returns empty array for unknown symbol', async () => {
+  it('explains an empty caller result instead of a bare []', async () => {
     const { handleGetCallers } = await import('../src/cli/commands/mcp.js');
-    const res = parseJsonResult(await handleGetCallers(dbDir, 'src/does-not-exist.ts::nope'));
-    expect(res).toEqual([]);
+    const res = await handleGetCallers(dbDir, 'src/does-not-exist.ts::nope');
+    expect(res.content[0]!.text).toContain('does not mean');
+    expect(res.content[0]!.text).toMatch(/vendor|not indexed/);
   });
 
   it('symbol output uses snake_case keys matching Cypher (file_path, symbol_type)', async () => {
@@ -246,10 +247,10 @@ describe('call-graph handlers', () => {
     expect(ids).toEqual(['src/f.ts::b', 'src/f.ts::d']);
   });
 
-  it('get_callees returns empty array for leaf symbol', async () => {
+  it('explains an empty callee result for a leaf symbol', async () => {
     const { handleGetCallees } = await import('../src/cli/commands/mcp.js');
-    const res = parseJsonResult(await handleGetCallees(dbDir, 'src/f.ts::c'));
-    expect(res).toEqual([]);
+    const res = await handleGetCallees(dbDir, 'src/f.ts::c');
+    expect(res.content[0]!.text).toContain('does not mean');
   });
 
   it('get_impact reaches all descendants with depth info', async () => {
