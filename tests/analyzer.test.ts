@@ -99,4 +99,35 @@ describe('analyzeAndIndex', () => {
     );
     expect(Number(rows[0]?.['n'])).toBe(1);
   });
+
+  // Inheritance: a $this->method() defined in a parent must resolve to the
+  // parent (precise), not be dropped or suffix-guessed to some other class.
+  it('resolves an inherited $this->method() call to the defining parent, with an EXTENDS edge', async () => {
+    fs.writeFileSync(
+      path.join(projectDir, 'src', 'cache.php'),
+      [
+        '<?php',
+        'class Base { public function clear(): void {} }',
+        'class Child extends Base {',
+        '    public function reset(): void { $this->clear(); }',
+        '}',
+      ].join('\n'),
+    );
+    const config: ShanpanConfig = {
+      analyze: { include: ['src'], exclude: ['node_modules'], languages: ['php'] },
+    };
+    await analyzeAndIndex(conn, projectDir, config);
+
+    const calls = await queryAll(
+      conn,
+      `MATCH (a:CodeSymbol)-[:CALLS]->(b:CodeSymbol) WHERE b.fqn = 'Base.clear' RETURN a.fqn AS caller`,
+    );
+    expect(calls.rows.map((r) => String(r['caller']))).toContain('Child.reset');
+
+    const ext = await queryAll(
+      conn,
+      `MATCH (c:CodeSymbol)-[:EXTENDS]->(p:CodeSymbol) RETURN c.fqn AS child, p.fqn AS parent`,
+    );
+    expect(ext.rows.some((r) => String(r['child']) === 'Child' && String(r['parent']) === 'Base')).toBe(true);
+  });
 });

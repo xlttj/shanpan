@@ -1,6 +1,6 @@
 import { createRequire } from 'module';
 import type Parser from 'tree-sitter';
-import type { CodeSymbol, SymbolKind, CallRef } from '../../types/code.js';
+import type { CodeSymbol, SymbolKind, CallRef, InheritanceEdge } from '../../types/code.js';
 import type { LanguageParser } from './parser.js';
 
 const require = createRequire(import.meta.url);
@@ -271,6 +271,53 @@ function collectCallRefs(
   }
 }
 
+/**
+ * Extends/uses relationships per class, by simple name. Method resolution needs
+ * the classes and traits that carry method *bodies* (extends + `use` traits);
+ * `implements` is omitted because an interface supplies no implementation.
+ */
+function collectInheritance(root: Parser.SyntaxNode, filePath: string): InheritanceEdge[] {
+  const edges: InheritanceEdge[] = [];
+
+  const parentsOf = (classNode: Parser.SyntaxNode): string[] => {
+    const parents: string[] = [];
+    for (const child of classNode.namedChildren) {
+      // `extends Base` — a base_clause holds one or more class names.
+      if (child.type === 'base_clause') {
+        for (const n of child.namedChildren) {
+          const name = extractClassName(n);
+          if (name) parents.push(name);
+        }
+      }
+      // `use SomeTrait, Other;` inside the class body brings in trait methods.
+      if (child.type === 'declaration_list') {
+        for (const member of child.namedChildren) {
+          if (member.type === 'use_declaration') {
+            for (const n of member.namedChildren) {
+              const name = extractClassName(n);
+              if (name) parents.push(name);
+            }
+          }
+        }
+      }
+    }
+    return parents;
+  };
+
+  const walk = (node: Parser.SyntaxNode): void => {
+    if (node.type === 'class_declaration' || node.type === 'trait_declaration') {
+      const nameNode = getNameNode(node);
+      if (nameNode) {
+        const parents = parentsOf(node);
+        if (parents.length > 0) edges.push({ child: nameNode.text, parents, filePath });
+      }
+    }
+    for (const c of node.namedChildren) walk(c);
+  };
+  walk(root);
+  return edges;
+}
+
 export class PhpParser implements LanguageParser {
   readonly name = 'php';
   readonly extensions = ['.php'];
@@ -295,5 +342,10 @@ export class PhpParser implements LanguageParser {
     const propTypes = buildPropertyTypes(tree.rootNode);
     collectCallRefs(tree.rootNode, symbols, results, propTypes);
     return results;
+  }
+
+  extractInheritance(filePath: string, source: string): InheritanceEdge[] {
+    const tree = this._parser.parse(source);
+    return collectInheritance(tree.rootNode, filePath);
   }
 }

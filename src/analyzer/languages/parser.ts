@@ -1,4 +1,4 @@
-import type { CodeSymbol, CallRef } from '../../types/code.js';
+import type { CodeSymbol, CallRef, InheritanceEdge } from '../../types/code.js';
 
 export interface LanguageParser {
   readonly name: string;
@@ -10,4 +10,9 @@ export interface LanguageParser {
    * by line-range containment rather than re-walking the tree.
    */
   extractCallRefs?(filePath: string, source: string, symbols: CodeSymbol[]): CallRef[];
+  /**
+   * Extract class inheritance (extends + used traits) so the indexer can
+   * resolve a `$this->method()` call to the ancestor that defines the method.
+   */
+  extractInheritance?(filePath: string, source: string): InheritanceEdge[];
 }

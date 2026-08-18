@@ -30,6 +30,20 @@ export interface ExtractionResult {
   error?: string;
 }
 
+/**
+ * A class and the classes/traits it inherits method implementations from
+ * (extends + used traits), by simple name. Used to resolve `$this->method()`
+ * to the ancestor that actually defines the method.
+ */
+export interface InheritanceEdge {
+  /** Simple name of the child class. */
+  child: string;
+  /** Simple names of parent classes and used traits. */
+  parents: string[];
+  /** File the child class lives in, for building the child's symbol id. */
+  filePath: string;
+}
+
 export type CallKind = 'static_call' | 'instantiation';
 
 export interface CallRef {

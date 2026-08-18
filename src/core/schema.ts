@@ -22,6 +22,10 @@ export const SCHEMA_STATEMENTS = [
     FROM CodeSymbol TO CodeSymbol,
     call_kind STRING
   )`,
+  // Class inheritance (extends + used traits), child → parent. Lets a query ask
+  // "does X override method Y", and lets incremental analyze rebuild the
+  // inheritance map used to resolve $this->method() to its defining class.
+  `CREATE REL TABLE EXTENDS (FROM CodeSymbol TO CodeSymbol)`,
   // Knowledge records. The wire format uses short keys to save context bytes;
   // the graph uses full names because queries are written by humans and agents,
   // not stored per-row. The indexer translates between the two.
@@ -52,7 +56,7 @@ export const SCHEMA_STATEMENTS = [
  * new tables instead of needing a full rebuild.
  */
 export const SCHEMA_TABLE_NAMES = [
-  'CodeSymbol', 'File', 'CONTAINS', 'CALLS',
+  'CodeSymbol', 'File', 'CONTAINS', 'CALLS', 'EXTENDS',
   'Record', 'ABOUT', 'SUPERSEDES',
 ];
 
@@ -72,6 +76,7 @@ export const DROP_ORDER = [
   'SUPERSEDES',
   'ABOUT',
   'CALLS',
+  'EXTENDS',
   'CONTAINS',
   'Record',
   'CodeSymbol',

@@ -1,7 +1,7 @@
 import chalk from 'chalk';
 import fs from 'node:fs';
 import path from 'node:path';
-import { openDatabase, closeDatabase, dbExists, queryAll } from '../../core/db.js';
+import { openDatabase, closeDatabase, dbExists, queryAll, ensureSchema } from '../../core/db.js';
 import { loadConfig, saveConfig } from '../../core/config.js';
 import { analyzeAndIndex, analyzeAndIndexIncremental } from '../../analyzer/indexer.js';
 import { walkFiles } from '../../analyzer/walker.js';
@@ -107,6 +107,10 @@ async function runOneAnalyze(
   let stats: Awaited<ReturnType<typeof analyzeAndIndex>>;
 
   try {
+    // Bring an older graph up to the current schema before writing — analyze
+    // may create tables (e.g. EXTENDS) that a pre-upgrade database lacks.
+    await ensureSchema(conn);
+
     const onProgress = makeProgressCallback(verbose);
 
     // The state cache lives beside the database but outlives it — deleting

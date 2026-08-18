@@ -5,7 +5,7 @@ import { Worker } from 'node:worker_threads';
 import { fileURLToPath } from 'node:url';
 import type { Connection } from '@ladybugdb/core';
 import type { ShanpanConfig } from '../types/config.js';
-import type { CodeSymbol, CallRef } from '../types/code.js';
+import type { CodeSymbol, CallRef, InheritanceEdge } from '../types/code.js';
 import { walkFiles } from './walker.js';
 import { getParserForExtension, getExtensionsForLanguages } from './languages/index.js';
 import { queryAll } from '../core/db.js';
@@ -37,11 +37,60 @@ function fileKind(ext: string): 'source' | 'config' | 'other' {
   return 'other';
 }
 
-function resolveCallTarget(targetName: string, symbols: CodeSymbol[]): CodeSymbol | null {
-  const exact = symbols.find((s) => s.fqn === targetName);
+/** Merge inheritance edges into a `child name → parent names` map. */
+function buildInheritanceMap(edges: Iterable<InheritanceEdge>): Map<string, string[]> {
+  const map = new Map<string, string[]>();
+  for (const e of edges) {
+    const cur = map.get(e.child) ?? [];
+    cur.push(...e.parents);
+    map.set(e.child, cur);
+  }
+  return map;
+}
+
+/**
+ * Resolve a call target to a symbol. Order matters:
+ *   1. exact fqn — a same-class or already-typed call;
+ *   2. walk the caller class's ancestors (extends + traits) for `Ancestor.method`
+ *      — this is how `$this->clear()` finds `ImageMemoryCache.clear`, and it is
+ *      precise, unlike the name-suffix guess;
+ *   3. name-suffix, last resort, kept so languages without inheritance data
+ *      (TypeScript, Python for now) still resolve `this.inherited()`.
+ */
+function resolveCallTarget(
+  targetName: string,
+  byFqn: Map<string, CodeSymbol>,
+  allSymbols: CodeSymbol[],
+  inheritanceMap: Map<string, string[]>,
+): CodeSymbol | null {
+  const exact = byFqn.get(targetName);
   if (exact) return exact;
+
+  const dot = targetName.lastIndexOf('.');
+  if (dot !== -1) {
+    const className = targetName.slice(0, dot);
+    const method = targetName.slice(dot + 1);
+    const seen = new Set<string>([className]);
+    const queue = [...(inheritanceMap.get(className) ?? [])];
+    while (queue.length > 0) {
+      const ancestor = queue.shift() as string;
+      if (seen.has(ancestor)) continue;
+      seen.add(ancestor);
+      const hit = byFqn.get(`${ancestor}.${method}`);
+      if (hit) return hit;
+      for (const p of inheritanceMap.get(ancestor) ?? []) if (!seen.has(p)) queue.push(p);
+    }
+  }
+
   const suffix = `.${targetName}`;
-  return symbols.find((s) => s.fqn.endsWith(suffix)) ?? null;
+  return allSymbols.find((s) => s.fqn.endsWith(suffix)) ?? null;
+}
+
+/** First symbol seen per fqn, matching the old find-first resolution order. */
+function indexByFqn(symbols: CodeSymbol[]): Map<string, CodeSymbol> {
+  const byFqn = new Map<string, CodeSymbol>();
+  for (const s of symbols) if (!byFqn.has(s.fqn)) byFqn.set(s.fqn, s);
+  return byFqn;
 }
 
 async function runQuery(conn: Connection, cypher: string): Promise<void> {
@@ -183,10 +232,12 @@ async function insertCallsEdges(
   conn: Connection,
   callRefs: CallRef[],
   allSymbols: CodeSymbol[],
+  inheritanceMap: Map<string, string[]>,
 ): Promise<number> {
+  const byFqn = indexByFqn(allSymbols);
   const resolved: [string, string, string][] = [];
   for (const ref of callRefs) {
-    const target = resolveCallTarget(ref.targetName, allSymbols);
+    const target = resolveCallTarget(ref.targetName, byFqn, allSymbols, inheritanceMap);
     if (target) resolved.push([ref.callerSymbolId, target.id, ref.kind]);
   }
 
@@ -201,9 +252,39 @@ async function insertCallsEdges(
   return resolved.length;
 }
 
+/**
+ * Create EXTENDS edges from each child class symbol to its parent class/trait
+ * symbol. A parent that has no symbol in the graph (e.g. a vendor base class)
+ * is skipped — the inheritance *map* still carries the name for resolution, but
+ * an edge needs both endpoints.
+ */
+async function insertExtendsEdges(
+  conn: Connection,
+  inheritance: InheritanceEdge[],
+  allSymbols: CodeSymbol[],
+): Promise<number> {
+  const byFqn = indexByFqn(allSymbols);
+  const pairs: [string, string][] = [];
+  for (const e of inheritance) {
+    const childId = `${e.filePath}::${e.child}`;
+    for (const parent of e.parents) {
+      const parentSym = byFqn.get(parent);
+      if (parentSym) pairs.push([childId, parentSym.id]);
+    }
+  }
+  const rows = pairs.map(([c, p]) => `[${esc(c)}, ${esc(p)}]`);
+  await batchQuery(
+    conn,
+    rows,
+    (list) =>
+      `UNWIND [${list}] AS e MATCH (c:CodeSymbol {id: e[1]}), (p:CodeSymbol {id: e[2]}) CREATE (c)-[:EXTENDS]->(p)`,
+  );
+  return pairs.length;
+}
+
 const WORKER_COUNT = Math.max(1, Math.min(os.cpus().length, 8));
 
-type ParseBatch = { allSymbols: CodeSymbol[]; allCallRefs: CallRef[]; parseErrors: number; scannedFiles: Map<string, string> };
+type ParseBatch = { allSymbols: CodeSymbol[]; allCallRefs: CallRef[]; allInheritance: InheritanceEdge[]; parseErrors: number; scannedFiles: Map<string, string> };
 
 function parseSerial(
   files: { absPath: string; relPath: string; ext: string }[],
@@ -211,6 +292,7 @@ function parseSerial(
 ): ParseBatch {
   const allSymbols: CodeSymbol[] = [];
   const allCallRefs: CallRef[] = [];
+  const allInheritance: InheritanceEdge[] = [];
   const scannedFiles = new Map<string, string>();
   let parseErrors = 0;
   for (let i = 0; i < files.length; i++) {
@@ -223,12 +305,13 @@ function parseSerial(
       const symbols = parser.extractSymbols(relPath, source);
       allSymbols.push(...symbols);
       if (parser.extractCallRefs) allCallRefs.push(...parser.extractCallRefs(relPath, source, symbols));
+      if (parser.extractInheritance) allInheritance.push(...parser.extractInheritance(relPath, source));
     } catch {
       parseErrors++;
     }
     onProgress?.(i + 1, files.length);
   }
-  return { allSymbols, allCallRefs, parseErrors, scannedFiles };
+  return { allSymbols, allCallRefs, allInheritance, parseErrors, scannedFiles };
 }
 
 // Resolve the worker script path. Returns null if not available (e.g. unbuilt dev tree).
@@ -252,13 +335,14 @@ async function parseWithWorkers(
   files: { absPath: string; relPath: string; ext: string }[],
   onProgress?: (n: number, total: number) => void,
 ): Promise<ParseBatch> {
-  if (files.length === 0) return { allSymbols: [], allCallRefs: [], parseErrors: 0, scannedFiles: new Map() };
+  if (files.length === 0) return { allSymbols: [], allCallRefs: [], allInheritance: [], parseErrors: 0, scannedFiles: new Map() };
 
   const workerScript = resolveWorkerScript();
   if (!workerScript) return parseSerial(files, onProgress);
 
   const allSymbols: CodeSymbol[] = [];
   const allCallRefs: CallRef[] = [];
+  const allInheritance: InheritanceEdge[] = [];
   const scannedFiles = new Map<string, string>();
   let parseErrors = 0;
   let completed = 0;
@@ -287,13 +371,14 @@ async function parseWithWorkers(
       } else {
         allSymbols.push(...result.symbols);
         allCallRefs.push(...result.callRefs);
+        allInheritance.push(...result.inheritance);
       }
       onProgress?.(completed, files.length);
       if (queue.length > 0) {
         dispatch(worker);
       } else if (pending === 0) {
         for (const w of workers) void w.terminate();
-        resolve({ allSymbols, allCallRefs, parseErrors, scannedFiles });
+        resolve({ allSymbols, allCallRefs, allInheritance, parseErrors, scannedFiles });
       }
     };
 
@@ -352,6 +437,7 @@ export async function analyzeAndIndex(
   const {
     allSymbols,
     allCallRefs,
+    allInheritance,
     parseErrors: workerParseErrors,
     scannedFiles,
   } = await parseWithWorkers(fileTasks, onProgress ? (n, t) => onProgress('scan', n, t) : undefined);
@@ -371,8 +457,9 @@ export async function analyzeAndIndex(
   const containsPairs = buildContainsPairs(symbols);
   stats.containsEdgesCreated = await insertContainsEdges(conn, containsPairs);
 
-  stats.callEdgesCreated = await insertCallsEdges(conn, allCallRefs, symbols);
-
+  await insertExtendsEdges(conn, allInheritance, symbols);
+  const inheritanceMap = buildInheritanceMap(allInheritance);
+  stats.callEdgesCreated = await insertCallsEdges(conn, allCallRefs, symbols, inheritanceMap);
 
   return stats;
 }
@@ -412,6 +499,7 @@ export async function analyzeAndIndexIncremental(
   const {
     allSymbols: newSymbols,
     allCallRefs: newCallRefs,
+    allInheritance: newInheritance,
     parseErrors: workerParseErrors,
     scannedFiles: newFiles,
   } = await parseWithWorkers(fileTasks, onProgress ? (n, t) => onProgress('scan', n, t) : undefined);
@@ -443,7 +531,20 @@ export async function analyzeAndIndexIncremental(
     }));
     const allCurrentSymbols = [...existingSymbols, ...symbols];
 
-    stats.callEdgesCreated = await insertCallsEdges(conn, newCallRefs, allCurrentSymbols);
+    // Inheritance for the changed files' classes; unchanged files' EXTENDS were
+    // left in the graph. Rebuild the full map from both so $this->method()
+    // resolves through parents defined in files this run did not touch.
+    await insertExtendsEdges(conn, newInheritance, allCurrentSymbols);
+    const { rows: extRows } = await queryAll(
+      conn,
+      'MATCH (c:CodeSymbol)-[:EXTENDS]->(p:CodeSymbol) RETURN c.fqn AS child, p.fqn AS parent',
+    );
+    const inheritanceMap = buildInheritanceMap([
+      ...extRows.map((r) => ({ child: String(r['child']), parents: [String(r['parent'])], filePath: '' })),
+      ...newInheritance,
+    ]);
+
+    stats.callEdgesCreated = await insertCallsEdges(conn, newCallRefs, allCurrentSymbols, inheritanceMap);
   }
 
   return stats;

@@ -4,7 +4,7 @@ import { PhpParser } from './languages/php.js';
 import { SqlParser } from './languages/sql.js';
 import { PythonParser } from './languages/python.js';
 import type { LanguageParser } from './languages/parser.js';
-import type { CodeSymbol, CallRef } from '../types/code.js';
+import type { CodeSymbol, CallRef, InheritanceEdge } from '../types/code.js';
 
 export interface ParseTask {
   relPath: string;
@@ -16,6 +16,7 @@ export interface ParseResult {
   relPath: string;
   symbols: CodeSymbol[];
   callRefs: CallRef[];
+  inheritance: InheritanceEdge[];
   error?: string;
 }
 
@@ -31,7 +32,7 @@ import fs from 'node:fs';
 parentPort!.on('message', (task: ParseTask) => {
   const parser = getParser(task.ext);
   if (!parser) {
-    parentPort!.postMessage({ relPath: task.relPath, symbols: [], callRefs: [] } satisfies ParseResult);
+    parentPort!.postMessage({ relPath: task.relPath, symbols: [], callRefs: [], inheritance: [] } satisfies ParseResult);
     return;
   }
 
@@ -39,12 +40,14 @@ parentPort!.on('message', (task: ParseTask) => {
     const source = fs.readFileSync(task.absPath, 'utf-8');
     const symbols = parser.extractSymbols(task.relPath, source);
     const callRefs = parser.extractCallRefs ? parser.extractCallRefs(task.relPath, source, symbols) : [];
-    parentPort!.postMessage({ relPath: task.relPath, symbols, callRefs } satisfies ParseResult);
+    const inheritance = parser.extractInheritance ? parser.extractInheritance(task.relPath, source) : [];
+    parentPort!.postMessage({ relPath: task.relPath, symbols, callRefs, inheritance } satisfies ParseResult);
   } catch (err) {
     parentPort!.postMessage({
       relPath: task.relPath,
       symbols: [],
       callRefs: [],
+      inheritance: [],
       error: (err as Error).message,
     } satisfies ParseResult);
   }
