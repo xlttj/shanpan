@@ -1,29 +1,38 @@
 # shanpan
 
-Shanpan stores software specifications as a knowledge graph and exposes them to AI agents via the Model Context Protocol. Specs are Markdown files with structured YAML frontmatter that link to code symbols; the graph tracks which functions, classes, and files implement which requirements, and surfaces drift when code changes break those links.
+Shanpan parses your codebase into a knowledge graph — files, classes, methods, and the calls between them — and welds committable knowledge records (traps, invariants, decisions and their reasons) onto that graph, anchored anywhere from a single method to a whole directory. It serves both to AI coding agents over the Model Context Protocol: the relevant records are injected when an agent edits code, and drift is flagged when the code a record describes moves or disappears. Knowledge is stored as newline-delimited JSON committed alongside your code. Parsed languages: TypeScript, Python, PHP, SQL.
 
 ## Requirements
 
-Node.js 20 or later.
+Node.js 20 or later. `npm install` compiles native tree-sitter grammars, so a C/C++ toolchain must be available.
 
 ## Install
 
+Not yet published to npm — install from source:
+
 ```bash
-npm install -g shanpan
+git clone https://github.com/xlttj/shanpan.git
+cd shanpan
+npm install    # install dependencies and build (the prepare script runs the build)
+npm link       # put the `shanpan` command on your PATH
 ```
+
+`npm install` builds automatically via the `prepare` script. After editing the source, rebuild with `npm run build` (or `npm run dev` to rebuild on change). Run the tests with `npm test`.
 
 ## Project setup
 
+Run these in the project you want shanpan to analyze:
+
 ```bash
-shanpan init           # create .shanpan/, write .shanpanrc.json, install agent skills and hooks
-shanpan index          # parse spec Markdown files into the graph
-shanpan analyze        # scan source code and link symbols to specs (incremental)
-shanpan analyze --full # force a complete rebuild, ignoring cached state
+shanpan init            # create .shanpan/, write .shanpanrc.json, install agent skills and hooks
+shanpan analyze         # scan source into the code graph and re-index knowledge records (incremental)
+shanpan analyze --full  # force a complete rebuild, ignoring cached state
+shanpan records index   # rebuild only the graph's Record nodes from .shanpan/knowledge.ndjson
 ```
 
 `shanpan init` detects which AI coding tool the project uses and installs agent skills and hooks automatically. Supported tools: **Claude Code**, **Cursor**, **OpenCode**. Skills are written to the tool's client directory (e.g. `.claude/skills/`); hooks wire `shanpan analyze` and `shanpan check` into the agent's file-edit and session-end events.
 
-Configuration is stored in `.shanpanrc.json` at the project root. If the file already exists when `init` runs it is left untouched.
+Configuration is stored in `.shanpanrc.json` at the project root. If the file already exists when `init` runs it is left untouched. By default only TypeScript is parsed; widen it via `analyze.languages`, e.g. `{ "analyze": { "languages": ["typescript", "python", "php", "sql"] } }`.
 
 ## MCP configuration
 
