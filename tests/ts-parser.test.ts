@@ -141,14 +141,14 @@ export class Product {}
     expect(call?.kind).toBe('static_call');
   });
 
-  it('skips super.method() calls', () => {
+  it('emits super.method() as a parent-scoped target', () => {
     const src = `export class Child extends Base {
   run() { super.run(); }
 }
 `;
     const symbols = parser.extractSymbols('src/child.ts', src);
     const refs = parser.extractCallRefs!('src/child.ts', src, symbols);
-    expect(refs).toHaveLength(0);
+    expect(refs.some((r) => r.targetName === 'parent::run')).toBe(true);
   });
 
   it('does not capture chained this.prop.method() (DI calls)', () => {
@@ -181,5 +181,49 @@ export class B {}
     const refs = parser.extractCallRefs!('src/a.ts', src, symbols);
     const inst = refs.find((r) => r.targetName === 'B');
     expect(inst?.line).toBeGreaterThan(0);
+  });
+});
+
+describe('TypeScriptParser — typed properties, super, inheritance', () => {
+  const parser2 = new TypeScriptParser();
+  const src = `class Client { send() {} }
+class Base { reset() {} }
+class Service extends Base implements Iface {
+  private client: Client;
+  constructor(private readonly other: Client) {}
+  run() {
+    this.client.send();
+    this.other.send();
+    this.helper();
+    super.reset();
+  }
+  helper() {}
+}`;
+
+  function refs() {
+    const symbols = parser2.extractSymbols('src/s.ts', src);
+    return parser2.extractCallRefs!('src/s.ts', src, symbols);
+  }
+
+  it('resolves a call on a typed field to Type.method', () => {
+    expect(refs().some((r) => r.targetName === 'Client.send')).toBe(true);
+  });
+
+  it('resolves a call on a constructor parameter property', () => {
+    // both this.client and this.other are Client → Client.send appears
+    expect(refs().filter((r) => r.targetName === 'Client.send').length).toBeGreaterThanOrEqual(2);
+  });
+
+  it('emits super.method() as parent-scoped and this.method() same-class', () => {
+    const t = refs().map((r) => r.targetName);
+    expect(t).toContain('parent::reset');
+    expect(t).toContain('Service.helper');
+  });
+
+  it('extracts extends + implements as inheritance edges', () => {
+    const edges = parser2.extractInheritance!('src/s.ts', src);
+    const service = edges.find((e) => e.child === 'Service');
+    expect(service?.parents).toContain('Base');
+    expect(service?.parents).toContain('Iface');
   });
 });

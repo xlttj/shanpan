@@ -197,6 +197,35 @@ export async function handleGetCallees(
   }
 }
 
+/**
+ * The classes and interfaces a symbol extends/implements, transitively (via
+ * EXTENDS edges). Lets an agent see the inheritance chain — and answer "does X
+ * override clear()?" by checking whether X defines its own clear — without Cypher.
+ */
+export async function handleGetSupertypes(
+  projectDir: string,
+  symbolId: string,
+): Promise<{ content: { type: 'text'; text: string }[] }> {
+  const { db, conn } = await openDatabase(projectDir, true);
+  try {
+    const { rows } = await queryAll(
+      conn,
+      `MATCH (c:CodeSymbol {id: '${escId(symbolId)}'})-[:EXTENDS*1..20]->(p:CodeSymbol)
+       RETURN DISTINCT p.id AS id, p.fqn AS fqn, p.symbol_type AS symbol_type`,
+    );
+    if (rows.length === 0) {
+      return textResult(
+        'No supertypes in the graph. The class has no in-repo parent, or its base class/interface ' +
+          'lives in a dependency that is not indexed.',
+      );
+    }
+    rows.sort((a, b) => String(a['fqn']).localeCompare(String(b['fqn'])));
+    return jsonResult(rows);
+  } finally {
+    await closeDatabase(db, conn);
+  }
+}
+
 export async function handleGetImpact(
   projectDir: string,
   symbolId: string,
@@ -696,6 +725,18 @@ export async function runMcp(options: { projectDir?: string } = {}): Promise<voi
         },
       },
       {
+        name: 'get_supertypes',
+        description:
+          'List the classes and interfaces a symbol extends/implements, transitively (EXTENDS edges). Use it to see the inheritance chain, or to answer "does X override method M?" — X overrides M when a supertype has M and X defines its own M too.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            symbolId: { type: 'string', description: 'Class symbol ID, e.g. "src/a.ts::Child"' },
+          },
+          required: ['symbolId'],
+        },
+      },
+      {
         name: 'get_impact',
         description:
           'Blast radius: symbols transitively reachable via outgoing CALLS, up to maxDepth (default 3, max 10).',
@@ -930,6 +971,10 @@ export async function runMcp(options: { projectDir?: string } = {}): Promise<voi
 
     if (name === 'get_callees') {
       return await handleGetCallees(projectDir, String(a['symbolId'] ?? ''));
+    }
+
+    if (name === 'get_supertypes') {
+      return await handleGetSupertypes(projectDir, String(a['symbolId'] ?? ''));
     }
 
     if (name === 'get_impact') {

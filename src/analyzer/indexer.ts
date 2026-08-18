@@ -276,7 +276,17 @@ async function insertCallsEdges(
     else unresolvedByCaller.set(ref.callerSymbolId, (unresolvedByCaller.get(ref.callerSymbolId) ?? 0) + 1);
   }
 
-  const rows = resolved.map(([caller, target, kind]) => `[${esc(caller)}, ${esc(target)}, ${esc(kind)}]`);
+  // One edge per (caller, target, kind): the same call written twice in a method
+  // is one relationship, not two parallel edges cluttering the graph.
+  const seen = new Set<string>();
+  const deduped = resolved.filter(([c, t, k]) => {
+    const key = `${c} ${t} ${k}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+
+  const rows = deduped.map(([caller, target, kind]) => `[${esc(caller)}, ${esc(target)}, ${esc(kind)}]`);
   await batchQuery(
     conn,
     rows,
@@ -295,7 +305,7 @@ async function insertCallsEdges(
     (list) => `UNWIND [${list}] AS u MATCH (c:CodeSymbol {id: u.id}) SET c.unresolved_calls = u.n`,
   );
 
-  return resolved.length;
+  return deduped.length;
 }
 
 /**

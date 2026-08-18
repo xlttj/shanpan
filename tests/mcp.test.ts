@@ -404,3 +404,50 @@ describe('search_symbols handler', () => {
   });
 });
 
+
+describe('get_supertypes handler', () => {
+  let dbDir: string;
+
+  beforeEach(async () => {
+    dbDir = fs.mkdtempSync(path.join(os.tmpdir(), 'shanpan-super-'));
+    fs.mkdirSync(path.join(dbDir, '.shanpan'), { recursive: true });
+    const { db, conn } = await openDatabase(dbDir);
+    await dropAndRecreateSchema(conn);
+    for (const [id, fqn] of [
+      ['src/a.ts::Child', 'Child'],
+      ['src/a.ts::Base', 'Base'],
+      ['src/a.ts::Root', 'Root'],
+    ]) {
+      const r = await conn.query(
+        `CREATE (:CodeSymbol { id: '${id}', fqn: '${fqn}', symbol_type: 'class', file_path: 'src/a.ts', line_start: 0, line_end: 0, language: 'typescript', unresolved_calls: 0 })`,
+      );
+      if (!Array.isArray(r)) r.close();
+    }
+    for (const [from, to] of [
+      ['src/a.ts::Child', 'src/a.ts::Base'],
+      ['src/a.ts::Base', 'src/a.ts::Root'],
+    ]) {
+      const r = await conn.query(
+        `MATCH (s:CodeSymbol {id: '${from}'}), (t:CodeSymbol {id: '${to}'}) CREATE (s)-[:EXTENDS]->(t)`,
+      );
+      if (!Array.isArray(r)) r.close();
+    }
+    await closeDatabase(db, conn);
+  });
+
+  afterEach(() => fs.rmSync(dbDir, { recursive: true, force: true }));
+
+  it('returns the transitive supertype chain', async () => {
+    const { handleGetSupertypes } = await import('../src/cli/commands/mcp.js');
+    const res = JSON.parse((await handleGetSupertypes(dbDir, 'src/a.ts::Child')).content[0]!.text) as {
+      fqn: string;
+    }[];
+    expect(res.map((r) => r.fqn).sort()).toEqual(['Base', 'Root']);
+  });
+
+  it('explains an empty result for a class with no in-repo supertype', async () => {
+    const { handleGetSupertypes } = await import('../src/cli/commands/mcp.js');
+    const res = await handleGetSupertypes(dbDir, 'src/a.ts::Root');
+    expect(res.content[0]!.text).toContain('No supertypes');
+  });
+});

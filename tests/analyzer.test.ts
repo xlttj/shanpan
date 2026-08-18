@@ -156,6 +156,42 @@ describe('analyzeAndIndex', () => {
     expect(callees).not.toContain('Child.set'); // must not self-loop to the override
   });
 
+  it('resolves TypeScript typed-property, inherited, and super calls', async () => {
+    fs.writeFileSync(
+      path.join(projectDir, 'src', 'svc.ts'),
+      [
+        'class Client { send(): void {} }',
+        'class Base { reset(): void {} }',
+        'class Service extends Base {',
+        '  private client: Client;',
+        '  run(): void {',
+        '    this.client.send();', // typed field → Client.send
+        '    this.reset();', //       inherited → Base.reset
+        '    super.reset();', //      parent-scoped → Base.reset
+        '  }',
+        '}',
+      ].join('\n'),
+    );
+    const config: ShanpanConfig = {
+      analyze: { include: ['src'], exclude: ['node_modules'], languages: ['typescript'] },
+    };
+    await analyzeAndIndex(conn, projectDir, config);
+
+    const { rows } = await queryAll(
+      conn,
+      `MATCH (a:CodeSymbol {fqn: 'Service.run'})-[:CALLS]->(b:CodeSymbol) RETURN b.fqn AS callee`,
+    );
+    const callees = rows.map((r) => String(r['callee']));
+    expect(callees).toContain('Client.send'); // typed property
+    expect(callees).toContain('Base.reset'); // this.reset() + super.reset(), inherited
+
+    const ext = await queryAll(
+      conn,
+      `MATCH (:CodeSymbol {fqn: 'Service'})-[:EXTENDS]->(p:CodeSymbol) RETURN p.fqn AS parent`,
+    );
+    expect(ext.rows.map((r) => String(r['parent']))).toContain('Base');
+  });
+
   it('counts unresolved outgoing calls (typed but vendor/unlinkable) per method', async () => {
     fs.writeFileSync(
       path.join(projectDir, 'src', 'svc.php'),

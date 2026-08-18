@@ -1,6 +1,6 @@
 import { createRequire } from 'module';
 import type Parser from 'tree-sitter';
-import type { CodeSymbol, SymbolKind, CallRef } from '../../types/code.js';
+import type { CodeSymbol, SymbolKind, CallRef, InheritanceEdge } from '../../types/code.js';
 import type { LanguageParser } from './parser.js';
 
 const require = createRequire(import.meta.url);
@@ -142,10 +142,113 @@ function findEnclosingSymbol(symbols: CodeSymbol[], line: number): CodeSymbol | 
   return best;
 }
 
+/** Simple class/interface name from a type node, or null when not a single named type. */
+function simpleTypeName(node: Parser.SyntaxNode | null): string | null {
+  if (!node) return null;
+  switch (node.type) {
+    case 'type_identifier':
+    case 'identifier':
+      return node.text;
+    case 'generic_type':
+      return simpleTypeName(node.childForFieldName('name') ?? node.namedChildren[0] ?? null);
+    case 'nested_type_identifier': {
+      const parts = node.namedChildren.filter((c) => c.type === 'type_identifier' || c.type === 'identifier');
+      return parts.length ? parts[parts.length - 1]!.text : null;
+    }
+    default:
+      return null; // predefined_type, union_type, intersection_type, … — not resolvable
+  }
+}
+
+/** The declared type name inside a `: Type` annotation. */
+function typeFromAnnotation(annotation: Parser.SyntaxNode | null): string | null {
+  if (!annotation) return null;
+  return simpleTypeName(annotation.namedChildren[0] ?? null);
+}
+
+/**
+ * Map of `class name → (property name → declared class type)` for one file,
+ * covering constructor parameter properties (`constructor(private foo: Foo)`)
+ * and typed field declarations (`private foo: Foo`). Lets a call on `this.prop`
+ * resolve to `Type.method` instead of being dropped.
+ */
+function buildPropertyTypes(root: Parser.SyntaxNode): Map<string, Map<string, string>> {
+  const out = new Map<string, Map<string, string>>();
+
+  const collect = (classNode: Parser.SyntaxNode, props: Map<string, string>): void => {
+    const body = classNode.childForFieldName('body');
+    if (!body) return;
+    for (const member of body.namedChildren) {
+      // Typed field: `foo: Foo`
+      if (member.type === 'public_field_definition') {
+        const name = member.childForFieldName('name')?.text;
+        const type = typeFromAnnotation(member.childForFieldName('type'));
+        if (name && type) props.set(name, type);
+      }
+      // Constructor parameter properties: `constructor(private foo: Foo)`
+      if (member.type === 'method_definition' && member.childForFieldName('name')?.text === 'constructor') {
+        const params = member.childForFieldName('parameters');
+        for (const p of params?.namedChildren ?? []) {
+          if (p.type !== 'required_parameter' && p.type !== 'optional_parameter') continue;
+          // A parameter is a property only with an accessibility/readonly modifier.
+          const isProp = p.namedChildren.some(
+            (c) => c.type === 'accessibility_modifier' || c.type === 'override_modifier',
+          );
+          if (!isProp) continue;
+          const name = p.childForFieldName('pattern')?.text;
+          const type = typeFromAnnotation(p.childForFieldName('type'));
+          if (name && type) props.set(name, type);
+        }
+      }
+    }
+  };
+
+  const walk = (node: Parser.SyntaxNode): void => {
+    if (node.type === 'class_declaration' || node.type === 'class') {
+      const nameNode = getNameNode(node);
+      if (nameNode) {
+        const props = out.get(nameNode.text) ?? new Map<string, string>();
+        collect(node, props);
+        out.set(nameNode.text, props);
+      }
+    }
+    for (const c of node.namedChildren) walk(c);
+  };
+  walk(root);
+  return out;
+}
+
+/** Extends + implements per class, by simple name, for inheritance resolution. */
+function collectInheritance(root: Parser.SyntaxNode, filePath: string): InheritanceEdge[] {
+  const edges: InheritanceEdge[] = [];
+  const walk = (node: Parser.SyntaxNode): void => {
+    if (node.type === 'class_declaration' || node.type === 'class') {
+      const nameNode = getNameNode(node);
+      const heritage = node.namedChildren.find((c) => c.type === 'class_heritage');
+      if (nameNode && heritage) {
+        const parents: string[] = [];
+        for (const clause of heritage.namedChildren) {
+          if (clause.type === 'extends_clause' || clause.type === 'implements_clause') {
+            for (const t of clause.namedChildren) {
+              const name = simpleTypeName(t);
+              if (name) parents.push(name);
+            }
+          }
+        }
+        if (parents.length > 0) edges.push({ child: nameNode.text, parents, filePath });
+      }
+    }
+    for (const c of node.namedChildren) walk(c);
+  };
+  walk(root);
+  return edges;
+}
+
 function collectCallRefs(
   node: Parser.SyntaxNode,
   symbols: CodeSymbol[],
   results: CallRef[],
+  propTypes: Map<string, Map<string, string>>,
 ): void {
   if (node.type === 'new_expression') {
     const ctorNode = node.childForFieldName('constructor');
@@ -171,6 +274,8 @@ function collectCallRefs(
         const line = node.startPosition.row + 1;
         const enclosing = findEnclosingSymbol(symbols, line);
         if (enclosing) {
+          const dotIdx = enclosing.fqn.lastIndexOf('.');
+          const className = dotIdx !== -1 ? enclosing.fqn.slice(0, dotIdx) : null;
           if (objNode.type === 'identifier') {
             // SomeClass.method() or variable.method() — use as-is
             results.push({
@@ -179,28 +284,32 @@ function collectCallRefs(
               kind: 'static_call',
               line,
             });
-          } else if (objNode.type === 'this') {
-            // this.method() — resolve target as EnclosingClass.method
-            // Chained calls (this.prop.method()) are not resolved: no type inference.
-            const dotIdx = enclosing.fqn.lastIndexOf('.');
-            if (dotIdx !== -1) {
-              const className = enclosing.fqn.slice(0, dotIdx);
-              results.push({
-                callerSymbolId: enclosing.id,
-                targetName: `${className}.${propNode.text}`,
-                kind: 'static_call',
-                line,
-              });
+          } else if (objNode.type === 'this' && className) {
+            // this.method() — resolve as EnclosingClass.method (the indexer walks
+            // ancestors for inherited methods).
+            results.push({ callerSymbolId: enclosing.id, targetName: `${className}.${propNode.text}`, kind: 'static_call', line });
+          } else if (objNode.type === 'super') {
+            // super.method() — resolve strictly in the ancestors.
+            results.push({ callerSymbolId: enclosing.id, targetName: `parent::${propNode.text}`, kind: 'static_call', line });
+          } else if (
+            objNode.type === 'member_expression' &&
+            objNode.childForFieldName('object')?.type === 'this' &&
+            className
+          ) {
+            // this.prop.method() — resolve prop's declared type to Type.method.
+            const propName = objNode.childForFieldName('property')?.text;
+            const propType = propName ? propTypes.get(className)?.get(propName) : undefined;
+            if (propType) {
+              results.push({ callerSymbolId: enclosing.id, targetName: `${propType}.${propNode.text}`, kind: 'static_call', line });
             }
           }
-          // super.method() and chained calls are intentionally skipped
         }
       }
     }
   }
 
   for (const child of node.namedChildren) {
-    collectCallRefs(child, symbols, results);
+    collectCallRefs(child, symbols, results, propTypes);
   }
 }
 
@@ -233,7 +342,16 @@ export class TypeScriptParser implements LanguageParser {
 
     const tree = this._parser.parse(source);
     const results: CallRef[] = [];
-    collectCallRefs(tree.rootNode, symbols, results);
+    const propTypes = buildPropertyTypes(tree.rootNode);
+    collectCallRefs(tree.rootNode, symbols, results, propTypes);
     return results;
+  }
+
+  extractInheritance(filePath: string, source: string): InheritanceEdge[] {
+    const ext = filePath.split('.').pop() ?? '';
+    const lang = ext === 'tsx' || ext === 'jsx' ? TSLanguage.tsx : TSLanguage.typescript;
+    this._parser.setLanguage(lang);
+    const tree = this._parser.parse(source);
+    return collectInheritance(tree.rootNode, filePath);
   }
 }
