@@ -31,9 +31,10 @@ nobody wrote in the diff.
 ## Before the first edit
 
 1. **Look up the symbol you are about to change**: call "get_records_for_symbol"
-   with the symbol ID ("filePath::fqn", e.g. "src/core/drift.ts::computeDrift")
-   or a bare file path. It walks method to class to file, so knowledge recorded
-   against a class reaches you when you edit one of its methods.
+   with the symbol ID — a file path, then "::", then the fully-qualified name
+   (e.g. "src/core/drift.ts::computeDrift") — or a bare file path. It walks
+   method to class to file, so knowledge recorded against a class reaches you
+   when you edit one of its methods.
 2. **Check what was rejected**: call "get_records_by_kind" with kind "rejected"
    before proposing any approach that feels novel. If your idea is already
    there, say so and pick something else rather than repeating it.
