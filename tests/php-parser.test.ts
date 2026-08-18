@@ -230,3 +230,54 @@ class B {}
     expect(inst?.line).toBeGreaterThan(0);
   });
 });
+
+describe('PhpParser — calls on typed properties (dependency injection)', () => {
+  const source = `<?php
+class DeferredImageCache {
+    public function flush(): void {}
+}
+class FlysystemImageCache {
+    public function clearMemory(): void {}
+}
+class FlushListener {
+    private DeferredImageCache $l1;
+    public function __construct(private FlysystemImageCache $l2) {}
+    public function onTerminate(): void {
+        $this->l1->flush();
+        $this->l2->clearMemory();
+        $this->localHelper();
+    }
+    public function localHelper(): void {}
+}
+`;
+
+  function refs() {
+    const symbols = parser.extractSymbols('src/L.php', source);
+    return parser.extractCallRefs!('src/L.php', source, symbols);
+  }
+
+  it('resolves a call on a declared typed property to Type.method', () => {
+    const r = refs().find((c) => c.targetName === 'DeferredImageCache.flush');
+    expect(r).toBeDefined();
+    expect(r?.callerSymbolId).toBe('src/L.php::FlushListener.onTerminate');
+  });
+
+  it('resolves a call on a constructor-promoted property', () => {
+    expect(refs().some((c) => c.targetName === 'FlysystemImageCache.clearMemory')).toBe(true);
+  });
+
+  it('still resolves same-class $this->method() calls', () => {
+    expect(refs().some((c) => c.targetName === 'FlushListener.localHelper')).toBe(true);
+  });
+
+  it('does not resolve a property whose type is a union', () => {
+    const src = `<?php
+class C {
+    private Foo|Bar $x;
+    public function run(): void { $this->x->go(); }
+}`;
+    const symbols = parser.extractSymbols('src/C.php', src);
+    const r = parser.extractCallRefs!('src/C.php', src, symbols);
+    expect(r.some((c) => c.targetName.endsWith('.go'))).toBe(false);
+  });
+});

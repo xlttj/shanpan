@@ -101,6 +101,77 @@ function extractClassName(node: Parser.SyntaxNode): string | null {
   return null;
 }
 
+const stripDollar = (s: string): string => (s.startsWith('$') ? s.slice(1) : s);
+
+/**
+ * Simple class name from a type declaration, or null when it carries no single
+ * resolvable class. Strips a nullable "?" and namespace segments ("\App\Foo" →
+ * "Foo"); unions and intersections ("Foo|Bar") are ambiguous, so they yield
+ * null rather than a guess.
+ */
+function simpleTypeName(typeNode: Parser.SyntaxNode | null): string | null {
+  if (!typeNode) return null;
+  const text = typeNode.text.trim();
+  if (text.includes('|') || text.includes('&')) return null;
+  const bare = text.replace(/^\?/, '').split('\\').filter(Boolean).pop() ?? '';
+  return /^[A-Za-z_][A-Za-z0-9_]*$/.test(bare) ? bare : null;
+}
+
+/**
+ * Map of `class name → (property name → declared class type)` for one file,
+ * covering typed property declarations and constructor-promoted parameters —
+ * the two ways a Symfony/PHP class names the type of an injected dependency.
+ * With it, a call on `$this->prop` resolves to `Type.method` instead of being
+ * dropped for want of type inference. Kept file-local, which is enough: a call
+ * and the property it reads live in the same class in the same file.
+ */
+function buildPropertyTypes(root: Parser.SyntaxNode): Map<string, Map<string, string>> {
+  const out = new Map<string, Map<string, string>>();
+
+  const collectProps = (classNode: Parser.SyntaxNode, props: Map<string, string>): void => {
+    const visit = (node: Parser.SyntaxNode): void => {
+      if (node.type === 'property_declaration') {
+        const typeName = simpleTypeName(node.childForFieldName('type'));
+        if (typeName) {
+          for (const el of node.namedChildren) {
+            if (el.type === 'property_element') {
+              const nm = el.childForFieldName('name')?.text;
+              if (nm) props.set(stripDollar(nm), typeName);
+            }
+          }
+        }
+        return;
+      }
+      if (node.type === 'property_promotion_parameter') {
+        const nm = node.childForFieldName('name')?.text;
+        const typeName = simpleTypeName(node.childForFieldName('type'));
+        if (nm && typeName) props.set(stripDollar(nm), typeName);
+        return;
+      }
+      // Do not descend into a nested class/trait — keep props scoped to this one.
+      if (node !== classNode && (node.type === 'class_declaration' || node.type === 'trait_declaration')) {
+        return;
+      }
+      for (const c of node.namedChildren) visit(c);
+    };
+    visit(classNode);
+  };
+
+  const walk = (node: Parser.SyntaxNode): void => {
+    if (node.type === 'class_declaration' || node.type === 'trait_declaration') {
+      const nameNode = getNameNode(node);
+      if (nameNode) {
+        const props = out.get(nameNode.text) ?? new Map<string, string>();
+        collectProps(node, props);
+        out.set(nameNode.text, props);
+      }
+    }
+    for (const c of node.namedChildren) walk(c);
+  };
+  walk(root);
+  return out;
+}
+
 function findEnclosingSymbol(symbols: CodeSymbol[], line: number): CodeSymbol | null {
   let best: CodeSymbol | null = null;
   let bestRange = Infinity;
@@ -120,6 +191,7 @@ function collectCallRefs(
   node: Parser.SyntaxNode,
   symbols: CodeSymbol[],
   results: CallRef[],
+  propTypes: Map<string, Map<string, string>>,
 ): void {
   if (node.type === 'scoped_call_expression') {
     const scopeNode = node.childForFieldName('scope');
@@ -158,30 +230,44 @@ function collectCallRefs(
       }
     }
   } else if (node.type === 'member_call_expression') {
-    // $this->method() — resolve target as EnclosingClass.method
-    // Chained calls ($this->prop->method()) are not resolved: no type inference.
     const objectNode = node.childForFieldName('object');
     const nameNode = node.childForFieldName('name');
-    if (objectNode && nameNode && objectNode.text === '$this') {
+    if (objectNode && nameNode) {
       const line = node.startPosition.row + 1;
       const enclosing = findEnclosingSymbol(symbols, line);
-      if (enclosing) {
-        const dotIdx = enclosing.fqn.lastIndexOf('.');
-        if (dotIdx !== -1) {
-          const className = enclosing.fqn.slice(0, dotIdx);
+      const dotIdx = enclosing ? enclosing.fqn.lastIndexOf('.') : -1;
+      const className = enclosing && dotIdx !== -1 ? enclosing.fqn.slice(0, dotIdx) : null;
+      if (enclosing && className) {
+        if (objectNode.text === '$this') {
+          // $this->method() — same class.
           results.push({
             callerSymbolId: enclosing.id,
             targetName: `${className}.${nameNode.text}`,
             kind: 'static_call',
             line,
           });
+        } else if (
+          objectNode.type === 'member_access_expression' &&
+          objectNode.childForFieldName('object')?.text === '$this'
+        ) {
+          // $this->prop->method() — resolve prop's declared type to Type.method.
+          const propName = objectNode.childForFieldName('name')?.text;
+          const propType = propName ? propTypes.get(className)?.get(propName) : undefined;
+          if (propType) {
+            results.push({
+              callerSymbolId: enclosing.id,
+              targetName: `${propType}.${nameNode.text}`,
+              kind: 'static_call',
+              line,
+            });
+          }
         }
       }
     }
   }
 
   for (const child of node.namedChildren) {
-    collectCallRefs(child, symbols, results);
+    collectCallRefs(child, symbols, results, propTypes);
   }
 }
 
@@ -206,7 +292,8 @@ export class PhpParser implements LanguageParser {
   extractCallRefs(filePath: string, source: string, symbols: CodeSymbol[]): CallRef[] {
     const tree = this._parser.parse(source);
     const results: CallRef[] = [];
-    collectCallRefs(tree.rootNode, symbols, results);
+    const propTypes = buildPropertyTypes(tree.rootNode);
+    collectCallRefs(tree.rootNode, symbols, results, propTypes);
     return results;
   }
 }
