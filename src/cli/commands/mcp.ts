@@ -40,15 +40,14 @@ function jsonResult(data: unknown) {
 export function diagnoseError(err: unknown): { content: { type: 'text'; text: string }[] } {
   const msg = err instanceof Error ? err.message : String(err);
   // An unknown *property* is a query typo, not a stale graph — do not tell the
-  // agent to rebuild. The most common trap: MCP tools return camelCase
-  // (filePath), but Cypher properties are snake_case (file_path).
+  // agent to rebuild. Property names are snake_case, matching what the other
+  // MCP tools now return, so a name copied from their output works verbatim.
   if (/cannot find property|property .*(does not exist|not found)/i.test(msg)) {
     return textResult(
       `shanpan: that property does not exist on the node (${msg}). This is a query ` +
-        'error, not a stale graph. Cypher uses snake_case even though the MCP tools ' +
-        'return camelCase. CodeSymbol properties: id, fqn, symbol_type, file_path, ' +
-        'line_start, line_end, language. Record properties: id, kind, claim, because, ' +
-        'provenance, ts, given, when_, then_, ref, live.',
+        'error, not a stale graph. CodeSymbol properties: id, fqn, symbol_type, ' +
+        'file_path, line_start, line_end, language. Record properties: id, kind, claim, ' +
+        'because, provenance, ts, given, when_, then_, ref, live.',
     );
   }
   if (/binder|does not exist|no such|catalog|table/i.test(msg)) {
@@ -109,7 +108,7 @@ export async function handleGetCallers(
       conn,
       `MATCH (c:CodeSymbol)-[:CALLS]->(:CodeSymbol {id: '${escId(symbolId)}'})
        RETURN DISTINCT c.id AS id, c.fqn AS fqn,
-                       c.file_path AS filePath, c.symbol_type AS kind`,
+                       c.file_path AS file_path, c.symbol_type AS symbol_type`,
     );
     rows.sort((a, b) => String(a['id']).localeCompare(String(b['id'])));
     return jsonResult(rows);
@@ -128,7 +127,7 @@ export async function handleGetCallees(
       conn,
       `MATCH (:CodeSymbol {id: '${escId(symbolId)}'})-[:CALLS]->(c:CodeSymbol)
        RETURN DISTINCT c.id AS id, c.fqn AS fqn,
-                       c.file_path AS filePath, c.symbol_type AS kind`,
+                       c.file_path AS file_path, c.symbol_type AS symbol_type`,
     );
     rows.sort((a, b) => String(a['id']).localeCompare(String(b['id'])));
     return jsonResult(rows);
@@ -147,7 +146,7 @@ export async function handleGetImpact(
   try {
     const visited = new Map<
       string,
-      { id: string; fqn: string; filePath: string; kind: string; depth: number; path: string[] }
+      { id: string; fqn: string; file_path: string; symbol_type: string; depth: number; path: string[] }
     >();
     let frontier: { id: string; path: string[] }[] = [{ id: symbolId, path: [symbolId] }];
     for (let depth = 1; depth <= maxDepth && frontier.length > 0; depth++) {
@@ -157,7 +156,7 @@ export async function handleGetImpact(
           conn,
           `MATCH (:CodeSymbol {id: '${escId(curr.id)}'})-[:CALLS]->(c:CodeSymbol)
            RETURN DISTINCT c.id AS id, c.fqn AS fqn,
-                           c.file_path AS filePath, c.symbol_type AS kind`,
+                           c.file_path AS file_path, c.symbol_type AS symbol_type`,
         );
         for (const row of rows) {
           const id = String(row['id']);
@@ -166,8 +165,8 @@ export async function handleGetImpact(
           visited.set(id, {
             id,
             fqn: String(row['fqn']),
-            filePath: String(row['filePath']),
-            kind: String(row['kind']),
+            file_path: String(row['file_path']),
+            symbol_type: String(row['symbol_type']),
             depth,
             path: newPath,
           });
@@ -195,7 +194,7 @@ export async function handleGetCallersTransitive(
   try {
     const visited = new Map<
       string,
-      { id: string; fqn: string; filePath: string; kind: string; depth: number; path: string[] }
+      { id: string; fqn: string; file_path: string; symbol_type: string; depth: number; path: string[] }
     >();
     let frontier: { id: string; path: string[] }[] = [{ id: symbolId, path: [symbolId] }];
     for (let depth = 1; depth <= maxDepth && frontier.length > 0; depth++) {
@@ -205,7 +204,7 @@ export async function handleGetCallersTransitive(
           conn,
           `MATCH (c:CodeSymbol)-[:CALLS]->(:CodeSymbol {id: '${escId(curr.id)}'})
            RETURN DISTINCT c.id AS id, c.fqn AS fqn,
-                           c.file_path AS filePath, c.symbol_type AS kind`,
+                           c.file_path AS file_path, c.symbol_type AS symbol_type`,
         );
         for (const row of rows) {
           const id = String(row['id']);
@@ -214,8 +213,8 @@ export async function handleGetCallersTransitive(
           visited.set(id, {
             id,
             fqn: String(row['fqn']),
-            filePath: String(row['filePath']),
-            kind: String(row['kind']),
+            file_path: String(row['file_path']),
+            symbol_type: String(row['symbol_type']),
             depth,
             path: newPath,
           });
@@ -236,8 +235,8 @@ export async function handleGetCallersTransitive(
 interface SymbolSearchResult {
   id: string;
   fqn: string;
-  filePath: string;
-  kind: string;
+  file_path: string;
+  symbol_type: string;
   score: number;
 }
 
@@ -266,9 +265,9 @@ export async function handleSearchSymbols(
     // Fetch the candidate set once, filter + score in TS — avoids assumptions
     // about LIKE/CONTAINS support and keeps the scoring logic obvious.
     let cypher =
-      'MATCH (c:CodeSymbol) RETURN c.id AS id, c.fqn AS fqn, c.file_path AS filePath, c.symbol_type AS kind LIMIT 10000';
+      'MATCH (c:CodeSymbol) RETURN c.id AS id, c.fqn AS fqn, c.file_path AS file_path, c.symbol_type AS symbol_type LIMIT 10000';
     if (kind && (CODE_SYMBOL_KINDS as readonly string[]).includes(kind)) {
-      cypher = `MATCH (c:CodeSymbol { symbol_type: '${escId(kind)}' }) RETURN c.id AS id, c.fqn AS fqn, c.file_path AS filePath, c.symbol_type AS kind LIMIT 10000`;
+      cypher = `MATCH (c:CodeSymbol { symbol_type: '${escId(kind)}' }) RETURN c.id AS id, c.fqn AS fqn, c.file_path AS file_path, c.symbol_type AS symbol_type LIMIT 10000`;
     }
     const { rows } = await queryAll(conn, cypher);
 
@@ -277,8 +276,8 @@ export async function handleSearchSymbols(
     for (const row of rows) {
       const id = String(row['id']);
       const fqn = String(row['fqn']);
-      const filePath = String(row['filePath']);
-      const rowKind = String(row['kind']);
+      const filePath = String(row['file_path']);
+      const rowKind = String(row['symbol_type']);
       let score = 0;
       if (fqn === query) {
         score = 100;
@@ -293,7 +292,7 @@ export async function handleSearchSymbols(
       if (score > 0) {
         const prev = scored.get(id);
         if (!prev || prev.score < score) {
-          scored.set(id, { id, fqn, filePath, kind: rowKind, score });
+          scored.set(id, { id, fqn, file_path: filePath, symbol_type: rowKind, score });
         }
       }
     }
@@ -309,7 +308,7 @@ export async function handleSearchSymbols(
 
 const RECORD_RETURN =
   `r.id AS id, r.kind AS kind, r.claim AS claim, r.because AS because,
-   r.given AS given, r.when_ AS whenClause, r.then_ AS thenClause,
+   r.given AS given, r.when_ AS when_, r.then_ AS then_,
    r.ref AS ref, r.provenance AS provenance, r.ts AS ts`;
 
 /**
@@ -571,9 +570,9 @@ export async function runMcp(options: { projectDir?: string } = {}): Promise<voi
         description:
           'Execute a read-only Cypher query against the graph. Node labels: CodeSymbol, ' +
           'File, Record. Relationships: CONTAINS, CALLS {call_kind}, EXTENDS (child→parent), ' +
-          'ABOUT, SUPERSEDES. CodeSymbol/File properties are snake_case in Cypher — ' +
-          'id, fqn, symbol_type, file_path, line_start, line_end, language — even though the ' +
-          'other MCP tools return them camelCased (filePath, lineStart). Use file_path, not filePath.',
+          'ABOUT, SUPERSEDES. CodeSymbol properties: id, fqn, symbol_type, file_path, ' +
+          'line_start, line_end, language — the same snake_case names the other MCP tools ' +
+          'return, so a field copied from their output works here verbatim.',
         inputSchema: {
           type: 'object',
           properties: { cypher: { type: 'string', description: 'Cypher query (read-only)' } },
@@ -818,7 +817,7 @@ export async function runMcp(options: { projectDir?: string } = {}): Promise<voi
           cypher += ` AND c.file_path = '${safe}'`;
         }
         cypher +=
-          ' RETURN c.id AS id, c.fqn AS fqn, c.symbol_type AS kind, c.file_path AS file_path ORDER BY c.file_path, c.fqn';
+          ' RETURN c.id AS id, c.fqn AS fqn, c.symbol_type AS symbol_type, c.file_path AS file_path ORDER BY c.file_path, c.fqn';
         const { rows } = await queryAll(conn, cypher);
         return jsonResult(rows);
       } finally {

@@ -227,6 +227,16 @@ describe('call-graph handlers', () => {
     expect(res).toEqual([]);
   });
 
+  it('symbol output uses snake_case keys matching Cypher (file_path, symbol_type)', async () => {
+    const { handleGetCallers } = await import('../src/cli/commands/mcp.js');
+    const res = parseJsonResult(await handleGetCallers(dbDir, 'src/f.ts::b')) as Record<string, unknown>[];
+    const row = res[0]!;
+    expect(row).toHaveProperty('file_path');
+    expect(row).toHaveProperty('symbol_type');
+    expect(row).not.toHaveProperty('filePath');
+    expect(row).not.toHaveProperty('kind');
+  });
+
   it('get_callees returns direct callees only', async () => {
     const { handleGetCallees } = await import('../src/cli/commands/mcp.js');
     const res = parseJsonResult(await handleGetCallees(dbDir, 'src/f.ts::a')) as {
@@ -366,7 +376,7 @@ describe('search_symbols handler', () => {
     }[];
     expect(res).toHaveLength(1);
     expect(res[0]?.id).toBe('src/tax.ts::Tax');
-    expect(res[0]?.kind).toBe('class');
+    expect(res[0]?.symbol_type).toBe('class');
   });
 
   it('empty query returns empty array', async () => {
