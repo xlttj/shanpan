@@ -49,6 +49,39 @@ function buildInheritanceMap(edges: Iterable<InheritanceEdge>): Map<string, stri
 }
 
 /**
+ * Find `Ancestor.method` by walking the class hierarchy strictly above
+ * `className` (its extends/traits, transitively) — never `className` itself.
+ * This is how `parent::method()` resolves, and the ancestor step of a normal
+ * `$this->method()`.
+ */
+function resolveInAncestors(
+  className: string,
+  method: string,
+  byFqn: Map<string, CodeSymbol>,
+  inheritanceMap: Map<string, string[]>,
+): CodeSymbol | null {
+  const seen = new Set<string>([className]);
+  const queue = [...(inheritanceMap.get(className) ?? [])];
+  while (queue.length > 0) {
+    const ancestor = queue.shift() as string;
+    if (seen.has(ancestor)) continue;
+    seen.add(ancestor);
+    const hit = byFqn.get(`${ancestor}.${method}`);
+    if (hit) return hit;
+    for (const p of inheritanceMap.get(ancestor) ?? []) if (!seen.has(p)) queue.push(p);
+  }
+  return null;
+}
+
+/** Class fqn from a symbol id `filePath::Class.method` → `Class` (null if none). */
+function classOfSymbolId(id: string): string | null {
+  const sep = id.indexOf('::');
+  const fqn = sep !== -1 ? id.slice(sep + 2) : id;
+  const dot = fqn.lastIndexOf('.');
+  return dot !== -1 ? fqn.slice(0, dot) : null;
+}
+
+/**
  * Resolve a call target to a symbol. Order matters:
  *   1. exact fqn — a same-class or already-typed call;
  *   2. walk the caller class's ancestors (extends + traits) for `Ancestor.method`
@@ -68,18 +101,8 @@ function resolveCallTarget(
 
   const dot = targetName.lastIndexOf('.');
   if (dot !== -1) {
-    const className = targetName.slice(0, dot);
-    const method = targetName.slice(dot + 1);
-    const seen = new Set<string>([className]);
-    const queue = [...(inheritanceMap.get(className) ?? [])];
-    while (queue.length > 0) {
-      const ancestor = queue.shift() as string;
-      if (seen.has(ancestor)) continue;
-      seen.add(ancestor);
-      const hit = byFqn.get(`${ancestor}.${method}`);
-      if (hit) return hit;
-      for (const p of inheritanceMap.get(ancestor) ?? []) if (!seen.has(p)) queue.push(p);
-    }
+    const ancestor = resolveInAncestors(targetName.slice(0, dot), targetName.slice(dot + 1), byFqn, inheritanceMap);
+    if (ancestor) return ancestor;
   }
 
   const suffix = `.${targetName}`;
@@ -237,7 +260,17 @@ async function insertCallsEdges(
   const byFqn = indexByFqn(allSymbols);
   const resolved: [string, string, string][] = [];
   for (const ref of callRefs) {
-    const target = resolveCallTarget(ref.targetName, byFqn, allSymbols, inheritanceMap);
+    let target: CodeSymbol | null;
+    if (ref.targetName.startsWith('parent::')) {
+      // parent::method() resolves strictly in the caller class's ancestors,
+      // never its own class — even when this class overrides the method.
+      const callerClass = classOfSymbolId(ref.callerSymbolId);
+      target = callerClass
+        ? resolveInAncestors(callerClass, ref.targetName.slice('parent::'.length), byFqn, inheritanceMap)
+        : null;
+    } else {
+      target = resolveCallTarget(ref.targetName, byFqn, allSymbols, inheritanceMap);
+    }
     if (target) resolved.push([ref.callerSymbolId, target.id, ref.kind]);
   }
 

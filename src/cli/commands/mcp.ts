@@ -568,7 +568,12 @@ export async function runMcp(options: { projectDir?: string } = {}): Promise<voi
     tools: [
       {
         name: 'query_graph',
-        description: 'Execute a read-only Cypher query against the graph',
+        description:
+          'Execute a read-only Cypher query against the graph. Node labels: CodeSymbol, ' +
+          'File, Record. Relationships: CONTAINS, CALLS {call_kind}, EXTENDS (child→parent), ' +
+          'ABOUT, SUPERSEDES. CodeSymbol/File properties are snake_case in Cypher — ' +
+          'id, fqn, symbol_type, file_path, line_start, line_end, language — even though the ' +
+          'other MCP tools return them camelCased (filePath, lineStart). Use file_path, not filePath.',
         inputSchema: {
           type: 'object',
           properties: { cypher: { type: 'string', description: 'Cypher query (read-only)' } },

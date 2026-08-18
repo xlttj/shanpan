@@ -128,7 +128,7 @@ class Handler {
     expect(sc?.callerSymbolId).toBe('src/Handler.php::Handler.handle');
   });
 
-  it('skips self:: and parent:: calls', () => {
+  it('emits self:: as same-class and parent:: as parent-scoped; skips static::', () => {
     const source = `<?php
 class Base {
   public function init() {
@@ -140,7 +140,7 @@ class Base {
 `;
     const symbols = parser.extractSymbols('src/Base.php', source);
     const refs = parser.extractCallRefs!('src/Base.php', source, symbols);
-    expect(refs).toHaveLength(0);
+    expect(refs.map((r) => r.targetName).sort()).toEqual(['Base.boot', 'parent::init']);
   });
 
   it('handles qualified class names in new expression', () => {
@@ -279,5 +279,22 @@ class C {
     const symbols = parser.extractSymbols('src/C.php', src);
     const r = parser.extractCallRefs!('src/C.php', src, symbols);
     expect(r.some((c) => c.targetName.endsWith('.go'))).toBe(false);
+  });
+});
+
+describe('PhpParser — parent:: / self:: scoped calls', () => {
+  it('emits parent::method as a parent-scoped target and self:: as same-class', () => {
+    const src = `<?php
+class Base { public function m() {} }
+class Child extends Base {
+    public function m() { parent::m(); self::other(); static::skip(); }
+    public function other() {}
+}`;
+    const symbols = parser.extractSymbols('src/c.php', src);
+    const r = parser.extractCallRefs!('src/c.php', src, symbols);
+    expect(r.some((c) => c.targetName === 'parent::m')).toBe(true);
+    expect(r.some((c) => c.targetName === 'Child.other')).toBe(true);
+    // static:: is late-static-bound — left unresolved.
+    expect(r.some((c) => c.targetName.includes('skip'))).toBe(false);
   });
 });

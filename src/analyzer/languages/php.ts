@@ -196,19 +196,26 @@ function collectCallRefs(
   if (node.type === 'scoped_call_expression') {
     const scopeNode = node.childForFieldName('scope');
     const nameNode = node.childForFieldName('name');
-    // Skip self::, parent::, static:: — can't resolve without type context
-    if (scopeNode && nameNode && scopeNode.type !== 'relative_scope') {
-      const className = extractClassName(scopeNode);
-      if (className) {
-        const line = node.startPosition.row + 1;
-        const enclosing = findEnclosingSymbol(symbols, line);
-        if (enclosing) {
-          results.push({
-            callerSymbolId: enclosing.id,
-            targetName: `${className}.${nameNode.text}`,
-            kind: 'static_call',
-            line,
-          });
+    if (scopeNode && nameNode) {
+      const line = node.startPosition.row + 1;
+      const enclosing = findEnclosingSymbol(symbols, line);
+      const dotIdx = enclosing ? enclosing.fqn.lastIndexOf('.') : -1;
+      const enclosingClass = enclosing && dotIdx !== -1 ? enclosing.fqn.slice(0, dotIdx) : null;
+      if (enclosing) {
+        if (scopeNode.type === 'relative_scope') {
+          // parent::m() → the indexer walks the caller's ancestors for m.
+          // self::m() → same class (inheritance-aware like $this->m()).
+          // static::m() → late static binding, left unresolved.
+          if (scopeNode.text === 'parent') {
+            results.push({ callerSymbolId: enclosing.id, targetName: `parent::${nameNode.text}`, kind: 'static_call', line });
+          } else if (scopeNode.text === 'self' && enclosingClass) {
+            results.push({ callerSymbolId: enclosing.id, targetName: `${enclosingClass}.${nameNode.text}`, kind: 'static_call', line });
+          }
+        } else {
+          const className = extractClassName(scopeNode);
+          if (className) {
+            results.push({ callerSymbolId: enclosing.id, targetName: `${className}.${nameNode.text}`, kind: 'static_call', line });
+          }
         }
       }
     }

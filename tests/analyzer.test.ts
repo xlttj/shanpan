@@ -130,4 +130,29 @@ describe('analyzeAndIndex', () => {
     );
     expect(ext.rows.some((r) => String(r['child']) === 'Child' && String(r['parent']) === 'Base')).toBe(true);
   });
+
+  it('resolves parent::method() to the ancestor even when the class overrides it', async () => {
+    fs.writeFileSync(
+      path.join(projectDir, 'src', 'over.php'),
+      [
+        '<?php',
+        'class Base { public function set($v): void {} }',
+        'class Child extends Base {',
+        '    public function set($v): void { parent::set($v); }',
+        '}',
+      ].join('\n'),
+    );
+    const config: ShanpanConfig = {
+      analyze: { include: ['src'], exclude: ['node_modules'], languages: ['php'] },
+    };
+    await analyzeAndIndex(conn, projectDir, config);
+
+    const { rows } = await queryAll(
+      conn,
+      `MATCH (a:CodeSymbol)-[:CALLS]->(b:CodeSymbol) WHERE a.fqn = 'Child.set' RETURN b.fqn AS callee`,
+    );
+    const callees = rows.map((r) => String(r['callee']));
+    expect(callees).toContain('Base.set');
+    expect(callees).not.toContain('Child.set'); // must not self-loop to the override
+  });
 });
