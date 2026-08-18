@@ -464,6 +464,19 @@ describe('record MCP handlers', () => {
     expect(new Set(ids).size).toBe(ids.length);
   });
 
+  it('orders records-for-symbol by kind priority — traps and invariants first', async () => {
+    const { handleGetRecordsForSymbol } = await import('../src/cli/commands/mcp.js');
+    const out = parsed(await handleGetRecordsForSymbol(dbDir, 'src/a.ts::Svc'));
+    const priority: Record<string, number> = {
+      gotcha: 0, constraint: 1, rejected: 2, decision: 3, source: 4, behavior: 5, intent: 6, conflict: 7,
+    };
+    const kinds = out.map((r: { kind: string }) => r.kind);
+    const prios = kinds.map((k: string) => priority[k] ?? 99);
+    expect(prios).toEqual([...prios].sort((a, b) => a - b));
+    // the constraint on Svc must lead the decision on Svc
+    expect(kinds.indexOf('constraint')).toBeLessThan(kinds.indexOf('decision'));
+  });
+
   it('searches claim and because text', async () => {
     const { handleSearchRecords } = await import('../src/cli/commands/mcp.js');
     expect(parsed(await handleSearchRecords(dbDir, 'invalidation')).map((r: { id: string }) => r.id))
@@ -736,9 +749,17 @@ describe('stale-graph diagnostics', () => {
 });
 
 describe('diagnoseError', () => {
-  it('translates a binder error into a recovery command', async () => {
+  it('treats an unknown property as a query typo, not a stale graph', async () => {
     const { diagnoseError } = await import('../src/cli/commands/mcp.js');
-    const res = diagnoseError(new Error('Binder exception: Cannot find property ref for r'));
+    const res = diagnoseError(new Error('Binder exception: Cannot find property filePath for c'));
+    expect(res.content[0]!.text).not.toContain('out of date');
+    expect(res.content[0]!.text).toContain('file_path');
+    expect(res.content[0]!.text).toContain('query error');
+  });
+
+  it('translates a genuine schema/table error into a rebuild command', async () => {
+    const { diagnoseError } = await import('../src/cli/commands/mcp.js');
+    const res = diagnoseError(new Error('Binder exception: Table Spec does not exist'));
     expect(res.content[0]!.text).toContain('out of date');
     expect(res.content[0]!.text).toContain('analyze --full');
   });

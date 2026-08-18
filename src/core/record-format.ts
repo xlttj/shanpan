@@ -22,7 +22,7 @@ export interface ContextRecord {
  * Order records so the ones that change what an agent is about to do come
  * first: traps and invariants, then things already tried, then background.
  */
-const KIND_PRIORITY: Record<string, number> = {
+export const KIND_PRIORITY: Record<string, number> = {
   gotcha: 0,
   constraint: 1,
   rejected: 2,

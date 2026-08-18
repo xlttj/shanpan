@@ -19,6 +19,7 @@ import {
 } from '../../core/records.js';
 import { indexRecords } from '../../core/record-indexer.js';
 import { ancestorDirs } from '../../core/dir-scope.js';
+import { KIND_PRIORITY } from '../../core/record-format.js';
 import { RECORD_KINDS, type KnowledgeRecord, type RecordKind } from '../../types/record.js';
 
 const MUTATING_KEYWORDS = /^\s*(CREATE|MERGE|SET|DELETE|REMOVE|DROP|ALTER|CALL)\b/i;
@@ -38,7 +39,19 @@ function jsonResult(data: unknown) {
 /** Turn a low-level DB error into an agent-actionable recovery message. */
 export function diagnoseError(err: unknown): { content: { type: 'text'; text: string }[] } {
   const msg = err instanceof Error ? err.message : String(err);
-  if (/binder|cannot find property|does not exist|no such|catalog|table/i.test(msg)) {
+  // An unknown *property* is a query typo, not a stale graph — do not tell the
+  // agent to rebuild. The most common trap: MCP tools return camelCase
+  // (filePath), but Cypher properties are snake_case (file_path).
+  if (/cannot find property|property .*(does not exist|not found)/i.test(msg)) {
+    return textResult(
+      `shanpan: that property does not exist on the node (${msg}). This is a query ` +
+        'error, not a stale graph. Cypher uses snake_case even though the MCP tools ' +
+        'return camelCase. CodeSymbol properties: id, fqn, symbol_type, file_path, ' +
+        'line_start, line_end, language. Record properties: id, kind, claim, because, ' +
+        'provenance, ts, given, when_, then_, ref, live.',
+    );
+  }
+  if (/binder|does not exist|no such|catalog|table/i.test(msg)) {
     return textResult(
       'shanpan: the graph database looks out of date — it likely predates a schema change ' +
         `(${msg}). Rebuild it with 'shanpan analyze --full' then 'shanpan records index' ` +
@@ -364,7 +377,14 @@ export async function handleGetRecordsForSymbol(
       for (const row of rows) byId.set(String(row['id']), row);
     }
 
-    const out = [...byId.values()];
+    // Lead with traps and invariants: gotcha/constraint before decision, the
+    // same priority the PreToolUse hook injects with. Without this the payload
+    // came back in resolution order and buried the load-bearing records.
+    const out = [...byId.values()].sort(
+      (a, b) =>
+        (KIND_PRIORITY[String(a['kind'])] ?? 99) - (KIND_PRIORITY[String(b['kind'])] ?? 99) ||
+        String(a['id']).localeCompare(String(b['id'])),
+    );
     return out.length === 0 ? await emptyRecordResult(projectDir, conn) : jsonResult(out);
   } finally {
     await closeDatabase(db, conn);
