@@ -138,7 +138,7 @@ function fileRow(id: string, ext: string): string {
 }
 
 function symbolRow(sym: CodeSymbol): string {
-  return `{id: ${esc(sym.id)}, fqn: ${esc(sym.fqn)}, symbol_type: ${esc(sym.kind)}, file_path: ${esc(sym.filePath)}, line_start: ${sym.lineStart}, line_end: ${sym.lineEnd}, language: ${esc(sym.language)}}`;
+  return `{id: ${esc(sym.id)}, fqn: ${esc(sym.fqn)}, symbol_type: ${esc(sym.kind)}, file_path: ${esc(sym.filePath)}, line_start: ${sym.lineStart}, line_end: ${sym.lineEnd}, language: ${esc(sym.language)}, unresolved_calls: 0}`;
 }
 
 async function insertFiles(
@@ -189,7 +189,7 @@ async function insertSymbols(
     const batch = rows.slice(i, i + BATCH_SIZE);
     await runQuery(
       conn,
-      `UNWIND [${batch.join(', ')}] AS row CREATE (:CodeSymbol {id: row.id, fqn: row.fqn, symbol_type: row.symbol_type, file_path: row.file_path, line_start: row.line_start, line_end: row.line_end, language: row.language})`,
+      `UNWIND [${batch.join(', ')}] AS row CREATE (:CodeSymbol {id: row.id, fqn: row.fqn, symbol_type: row.symbol_type, file_path: row.file_path, line_start: row.line_start, line_end: row.line_end, language: row.language, unresolved_calls: row.unresolved_calls})`,
     );
     inserted += batch.length;
     onProgress?.(offset + inserted, total);
@@ -259,6 +259,7 @@ async function insertCallsEdges(
 ): Promise<number> {
   const byFqn = indexByFqn(allSymbols);
   const resolved: [string, string, string][] = [];
+  const unresolvedByCaller = new Map<string, number>();
   for (const ref of callRefs) {
     let target: CodeSymbol | null;
     if (ref.targetName.startsWith('parent::')) {
@@ -272,6 +273,7 @@ async function insertCallsEdges(
       target = resolveCallTarget(ref.targetName, byFqn, allSymbols, inheritanceMap);
     }
     if (target) resolved.push([ref.callerSymbolId, target.id, ref.kind]);
+    else unresolvedByCaller.set(ref.callerSymbolId, (unresolvedByCaller.get(ref.callerSymbolId) ?? 0) + 1);
   }
 
   const rows = resolved.map(([caller, target, kind]) => `[${esc(caller)}, ${esc(target)}, ${esc(kind)}]`);
@@ -280,6 +282,17 @@ async function insertCallsEdges(
     rows,
     (list) =>
       `UNWIND [${list}] AS e MATCH (caller:CodeSymbol {id: e[1]}), (target:CodeSymbol {id: e[2]}) CREATE (caller)-[:CALLS {call_kind: e[3]}]->(target)`,
+  );
+
+  // Persist how many call sites in each caller went unresolved — a vendor,
+  // dynamic, or otherwise unlinkable call. Nodes are recreated with 0 each
+  // analyze, so only the non-zero counts need writing. This turns an empty
+  // get_callees ("no calls") into a distinguishable "N calls I could not link".
+  const countRows = [...unresolvedByCaller.entries()].map(([id, n]) => `{id: ${esc(id)}, n: ${n}}`);
+  await batchQuery(
+    conn,
+    countRows,
+    (list) => `UNWIND [${list}] AS u MATCH (c:CodeSymbol {id: u.id}) SET c.unresolved_calls = u.n`,
   );
 
   return resolved.length;

@@ -155,4 +155,38 @@ describe('analyzeAndIndex', () => {
     expect(callees).toContain('Base.set');
     expect(callees).not.toContain('Child.set'); // must not self-loop to the override
   });
+
+  it('counts unresolved outgoing calls (typed but vendor/unlinkable) per method', async () => {
+    fs.writeFileSync(
+      path.join(projectDir, 'src', 'svc.php'),
+      [
+        '<?php',
+        'class Service {',
+        '    public function __construct(private VendorClient $client) {}',
+        '    public function run(): void {',
+        '        $this->client->send();', // VendorClient not in graph → unresolved
+        '        $this->helper();', //        Service.helper → resolves
+        '    }',
+        '    public function helper(): void {}',
+        '}',
+      ].join('\n'),
+    );
+    const config: ShanpanConfig = {
+      analyze: { include: ['src'], exclude: ['node_modules'], languages: ['php'] },
+    };
+    await analyzeAndIndex(conn, projectDir, config);
+
+    const { rows } = await queryAll(
+      conn,
+      `MATCH (c:CodeSymbol) WHERE c.fqn = 'Service.run' RETURN c.unresolved_calls AS n`,
+    );
+    expect(Number(rows[0]?.['n'])).toBe(1);
+
+    // A method with no unresolved calls stays at 0.
+    const helper = await queryAll(
+      conn,
+      `MATCH (c:CodeSymbol) WHERE c.fqn = 'Service.helper' RETURN c.unresolved_calls AS n`,
+    );
+    expect(Number(helper.rows[0]?.['n'])).toBe(0);
+  });
 });

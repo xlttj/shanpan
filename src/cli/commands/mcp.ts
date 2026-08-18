@@ -149,7 +149,7 @@ export async function handleGetCallers(
        RETURN DISTINCT c.id AS id, c.fqn AS fqn,
                        c.file_path AS file_path, c.symbol_type AS symbol_type`,
     );
-    if (rows.length === 0) return noCallersResult('callers');
+    if (rows.length === 0) return noCallersResult();
     rows.sort((a, b) => String(a['id']).localeCompare(String(b['id'])));
     return jsonResult(rows);
   } finally {
@@ -158,14 +158,14 @@ export async function handleGetCallers(
 }
 
 /**
- * An empty caller/callee list is ambiguous — "nothing calls this" or "the
- * analyzer does not see the call". Say which so an agent does not read a
- * framework-driven method (a Symfony kernel.reset listener, say) as dead code.
+ * An empty caller list is ambiguous — "nothing calls this" or "the analyzer
+ * does not see the call". Say which so an agent does not read a framework-driven
+ * method (a Symfony kernel.reset listener, say) as dead code. (Callees carry an
+ * unresolved_calls count instead, which is precise per method.)
  */
-function noCallersResult(kind: 'callers' | 'callees'): { content: { type: 'text'; text: string }[] } {
-  const what = kind === 'callers' ? 'in-repo static callers' : 'resolved outgoing calls';
+function noCallersResult(): { content: { type: 'text'; text: string }[] } {
   return textResult(
-    `No ${what}. This does not mean the symbol has none — vendor calls and ` +
+    'No in-repo static callers. This does not mean nothing calls it — vendor calls and ' +
       'container-tag / framework dispatch (e.g. Symfony kernel.reset) are not indexed, ' +
       'and static:: / dynamic calls are not resolved.',
   );
@@ -183,9 +183,15 @@ export async function handleGetCallees(
        RETURN DISTINCT c.id AS id, c.fqn AS fqn,
                        c.file_path AS file_path, c.symbol_type AS symbol_type`,
     );
-    if (rows.length === 0) return noCallersResult('callees');
     rows.sort((a, b) => String(a['id']).localeCompare(String(b['id'])));
-    return jsonResult(rows);
+    // unresolved_calls disambiguates an empty list: 0 = genuine leaf; >0 = the
+    // method makes calls the analyzer could not link (vendor/dynamic) — read it.
+    const { rows: ucRows } = await queryAll(
+      conn,
+      `MATCH (c:CodeSymbol {id: '${escId(symbolId)}'}) RETURN c.unresolved_calls AS n`,
+    );
+    const unresolved = Number(ucRows[0]?.['n'] ?? 0);
+    return jsonResult({ callees: rows, unresolved_calls: unresolved });
   } finally {
     await closeDatabase(db, conn);
   }
@@ -680,7 +686,7 @@ export async function runMcp(options: { projectDir?: string } = {}): Promise<voi
       {
         name: 'get_callees',
         description:
-          'List code symbols that the given symbol directly calls (1-hop outgoing CALLS edges). Resolves $this->prop->m() by property type and $this->m()/parent::m() through the class hierarchy; static:: and vendor calls are not resolved.',
+          'Returns { callees: [...], unresolved_calls: N } for the given symbol (1-hop outgoing CALLS edges). unresolved_calls is how many call sites in the method could NOT be linked to a symbol: 0 means the callee list is complete; >0 means the method makes vendor/dynamic calls the graph does not show — read the code. Resolves $this->prop->m() by property type and $this->m()/parent::m() through the class hierarchy; static:: and vendor calls are not resolved.',
         inputSchema: {
           type: 'object',
           properties: {

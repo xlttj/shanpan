@@ -6,7 +6,8 @@ export const SCHEMA_STATEMENTS = [
     file_path STRING,
     line_start INT64,
     line_end INT64,
-    language STRING
+    language STRING,
+    unresolved_calls INT64
   )`,
   `CREATE NODE TABLE File (
     id   STRING PRIMARY KEY,
@@ -69,6 +70,7 @@ export const SCHEMA_TABLE_NAMES = [
  */
 export const SCHEMA_MIGRATIONS = [
   'ALTER TABLE Record ADD ref STRING',
+  'ALTER TABLE CodeSymbol ADD unresolved_calls INT64',
 ];
 
 /** Tables to drop in dependency order (edges before nodes). */

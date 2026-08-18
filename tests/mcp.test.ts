@@ -238,19 +238,25 @@ describe('call-graph handlers', () => {
     expect(row).not.toHaveProperty('kind');
   });
 
-  it('get_callees returns direct callees only', async () => {
+  it('get_callees returns { callees, unresolved_calls }', async () => {
     const { handleGetCallees } = await import('../src/cli/commands/mcp.js');
     const res = parseJsonResult(await handleGetCallees(dbDir, 'src/f.ts::a')) as {
-      id: string;
-    }[];
-    const ids = res.map((r) => r.id).sort();
+      callees: { id: string }[];
+      unresolved_calls: number;
+    };
+    const ids = res.callees.map((r) => r.id).sort();
     expect(ids).toEqual(['src/f.ts::b', 'src/f.ts::d']);
+    expect(res.unresolved_calls).toBe(0);
   });
 
-  it('explains an empty callee result for a leaf symbol', async () => {
+  it('reports 0 unresolved_calls with an empty callee list for a genuine leaf', async () => {
     const { handleGetCallees } = await import('../src/cli/commands/mcp.js');
-    const res = await handleGetCallees(dbDir, 'src/f.ts::c');
-    expect(res.content[0]!.text).toContain('does not mean');
+    const res = parseJsonResult(await handleGetCallees(dbDir, 'src/f.ts::c')) as {
+      callees: unknown[];
+      unresolved_calls: number;
+    };
+    expect(res.callees).toEqual([]);
+    expect(res.unresolved_calls).toBe(0);
   });
 
   it('get_impact reaches all descendants with depth info', async () => {
