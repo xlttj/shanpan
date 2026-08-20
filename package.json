@@ -35,9 +35,12 @@
     "@types/node": "^20.0.0",
     "tsup": "^8.0.0",
     "typescript": "^5.4.0",
-    "vitest": "^2.0.0"
+    "vitest": "^4.1.11"
   },
   "engines": {
     "node": "^20 || ^22"
+  },
+  "overrides": {
+    "esbuild": "^0.28.2"
   }
 }
