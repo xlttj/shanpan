@@ -25,5 +25,8 @@ dist/
 .cursor/skills/knowledge-*/
 .opencode/skills/knowledge-*/
 
-# init writes this byte-identical to DEFAULT_CONFIG — nothing to track.
-.shanpanrc.json
+# .shanpanrc.json is deliberately NOT ignored. It is the one file that declares
+# a repository uses shanpan at all — everything else here is either derived or
+# generated — and it is where shared settings live, so a teammate's clone
+# analyzes the same languages and paths rather than silently falling back to
+# the defaults.

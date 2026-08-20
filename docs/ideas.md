@@ -330,3 +330,33 @@ Proposed defaults are the values above:
 - **pull: session-start** — one network round trip per session instead of one
   per read.
 - **notify: inferred** — see above.
+
+### Prerequisite both ideas hid: the config must be tracked
+
+Surfaced while asking how a fresh clone learns that a knowledge ref exists.
+The answer was going to be "the config declares it" — except
+`.shanpanrc.json` was ignored in this repo, on the reasoning that `init`
+writes it byte-identical to `DEFAULT_CONFIG`, so there was nothing to track.
+
+That reasoning holds only while the file carries no decisions. It stops
+holding the moment it carries project policy — which ref, and the
+commit/push/pull/notify axes above. Settings that are meant to be shared
+cannot live in a file nobody shares; the ref approach would fragment at
+exactly the point where it is supposed to create common ground.
+
+The stronger reason came from the other direction: **it is the one file that
+says a repository uses shanpan at all.** The graph is derived, the skills are
+generated, the rc was ignored — and under the ref model the record file leaves
+the worktree too. A freshly cloned project would be indistinguishable from one
+that never adopted shanpan. Something has to declare it.
+
+Now un-ignored and committed, with the README saying so. Note this rule was
+local to this repository — nothing in `src/` writes `.gitignore` entries, so
+user projects were never affected.
+
+**Related, for the migration:** the same `.gitignore` currently re-includes
+`knowledge.ndjson` with the comment *"the knowledge records are the source of
+truth and must be committed."* Under the ref model that sentence inverts.
+Migrating is therefore not just a `git rm --cached` — two rules that today
+stand with good reasons have to be reversed, and the reasons in the comments
+have to travel with them, or the next reader finds the opposite of what holds.

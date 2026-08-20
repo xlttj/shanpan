@@ -34,6 +34,8 @@ shanpan records index   # rebuild only the graph's Record nodes from .shanpan/kn
 
 Configuration is stored in `.shanpanrc.json` at the project root. If the file already exists when `init` runs it is left untouched. By default only TypeScript is parsed; widen it via `analyze.languages`, e.g. `{ "analyze": { "languages": ["typescript", "python", "php", "sql"] } }`.
 
+Commit `.shanpanrc.json`. It is the file that declares a repository uses shanpan — the graph and the generated skills are all ignored — and committing it means a teammate's fresh clone analyzes the same languages and paths instead of silently falling back to the defaults.
+
 ## MCP configuration
 
 Add the following to your MCP client's server configuration. `--project-dir` must be the absolute path to the project root that contains `.shanpan/`.

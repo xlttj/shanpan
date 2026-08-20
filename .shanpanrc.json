@@ -1,0 +1,18 @@
+{
+  "analyze": {
+    "include": [
+      "src"
+    ],
+    "exclude": [
+      "node_modules",
+      "dist",
+      ".git",
+      "vendor",
+      "build",
+      "coverage"
+    ],
+    "languages": [
+      "typescript"
+    ]
+  }
+}
