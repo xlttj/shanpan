@@ -211,6 +211,64 @@ possibly stale copy per worktree. Hence the rule:
 > `git rev-parse refs/shanpan/knowledge` — a sub-millisecond call, so
 > invalidation is trivial and staleness is structurally impossible.
 
+### Storage backend — the change is smaller than the idea sounds
+
+If the ref is the truth, how does `shanpan analyze` still read the file?
+Counted in the code rather than assumed:
+
+- **10 read sites**, every one through `readRecords(projectDir)` — including
+  `analyze.ts:154`, `record-drift.ts:62`, three in the MCP server, two in
+  `bootstrap`.
+- **3 write sites**, every one through `appendRecords(projectDir, recs)`.
+- **Exactly one file touches the filesystem**: `records.ts:243-259`.
+
+Nobody opens `knowledge.ndjson` directly. The storage backend is therefore
+swappable behind **two functions**, and `analyze` needs to know nothing.
+`parseRecords(text)` is already separate and pure, so the "where do the bytes
+come from" / "what do they mean" split is drawn as well.
+
+**Two possible answers:**
+
+- **A — materialise, but as cache.** The file stays at
+  `.shanpan/knowledge.ndjson`, untracked, refreshed from the ref when its SHA
+  changes. `readRecords` stays literally unchanged; the whole change is a
+  refresh step in front of it.
+- **B — never materialise.** `readRecords` becomes
+  `git show <ref>:knowledge.ndjson` → `parseRecords`. One function body.
+
+**Take A, and the deciding reason is error messages.** `validateRecord`
+reports errors *with a line number*, and `shanpan records validate` prints
+them — "line 47: malformed JSON". If the content exists only inside a git
+object, line 47 of *what*? The developer has nothing to open. A materialised
+file keeps that message actionable, and keeps `grep` and an editor working —
+for a plaintext format that is part of the promise, not a side effect.
+
+B additionally costs a subprocess per read, and the MCP server reads on nearly
+every tool call. And without git there would be no knowledge at all, which
+breaks non-repo usage and the tests.
+
+**The hazard to secure first:** the write path becomes two-stage — append to
+the cache, then commit to the ref. A crash in between leaves a record in the
+file but not in the ref, and the next refresh would **silently drop it**.
+
+> **The refresh must be a merge, never an overwrite.** Not `git show > file`,
+> but union by record `id`.
+
+That is the same semantic merge already required for concurrent pushes; it
+just has to be used in the refresh path too, not only on push. Then an aborted
+commit is harmless — the record is still there and reaches the ref next time.
+`appendRecords` already writes whole lines so concurrent appends cannot
+interleave (`records.ts:251`); that property carries over unchanged.
+
+**Unaffected:** `missingProvenanceRefs` checks the *cited* files in the
+working tree, not the ndjson itself. The fabrication gate keeps working as is.
+
+**Migration:** today `.shanpan/knowledge.ndjson` is tracked and carries
+`merge=union` on the code branch. It would become ignored — remove from the
+index, seed the ref from its existing history, extend `.gitignore`, and keep
+the old mode working for projects that do not want the move. Same care as the
+`.specgraph` → `.shanpan` rename.
+
 **Remaining mechanics:** read without checkout via `git show <ref>:<path>`;
 write without checkout via `hash-object` / `commit-tree` / `update-ref`, so
 nothing ever touches a worktree. Concurrent pushes need a fetch-merge-retry
