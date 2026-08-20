@@ -76,17 +76,21 @@ with anyone else. Only slice 3 makes knowledge move between machines.
 ```jsonc
 {
   "knowledge": {
-    "ref":    null,             // null = current behaviour, file in the tree
-    "commit": "auto",           // auto | never
-    "push":   "session-end",    // auto | session-end | never
-    "pull":   "session-start",  // session-start | on-read | never
     "notify": "inferred"        // all | inferred | never
   }
 }
 ```
 
-`ref: null` is the default, so nothing changes for an existing project until
-someone opts in.
+**Shipped with `notify` only, deliberately.** The plan originally declared all
+five keys here — `ref`, `commit`, `push`, `pull` as well — so that later stages
+would only add behaviour. That is the wrong trade: a key that parses and
+validates but does nothing is a lie to whoever sets it. Someone writing
+`"push": "auto"` would reasonably expect their records to be pushed. Each
+remaining key lands in the stage that gives it an effect.
+
+An unknown value falls back to the default rather than leaving the tool in a
+state it has no behaviour for, and a config written before the block existed
+keeps working.
 
 ### 1.2 Classifying a record as observed or inferred
 
