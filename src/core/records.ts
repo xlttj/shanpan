@@ -61,14 +61,23 @@ export function tsToSql(ts: string): string | null {
 
 // ─── ids ─────────────────────────────────────────────────────────────────────
 
-/** Generate a short id not present in `taken`. */
+/**
+ * Generate a short id not present in `taken`.
+ *
+ * Five bytes rather than three, because `taken` only holds what *this* machine
+ * has seen. Two people appending in parallel draw from the same space with
+ * different views of it, so the local check cannot rule out a collision — and
+ * a collision costs a record. Ten hex characters put that out of reach.
+ * validateRecord accepts any length, so shorter ids written earlier stay valid
+ * and nothing has to migrate.
+ */
 export function nextId(taken: ReadonlySet<string>): string {
   for (let attempt = 0; attempt < 1000; attempt++) {
-    const id = crypto.randomBytes(3).toString('hex');
+    const id = crypto.randomBytes(5).toString('hex');
     if (!taken.has(id)) return id;
   }
   // Astronomically unlikely; widen rather than loop forever.
-  return crypto.randomBytes(8).toString('hex');
+  return crypto.randomBytes(16).toString('hex');
 }
 
 // ─── validation ──────────────────────────────────────────────────────────────
@@ -204,7 +213,9 @@ export interface ParseResult {
 export function parseRecords(text: string): ParseResult {
   const records: KnowledgeRecord[] = [];
   const errors: RecordValidationError[] = [];
-  const seen = new Set<string>();
+  // id → canonical serialisation, so a harmless repeat can be told from a
+  // genuine conflict without comparing field by field.
+  const seen = new Map<string, string>();
 
   const lines = text.split('\n');
   for (let i = 0; i < lines.length; i++) {
@@ -227,13 +238,25 @@ export function parseRecords(text: string): ParseResult {
     }
 
     const rec = parsed as KnowledgeRecord;
-    if (seen.has(rec.id)) {
-      // merge=union can in principle land the same line twice; identical
-      // duplicates are harmless, genuine id reuse is not.
-      errors.push({ line: lineNo, id: rec.id, message: `duplicate id '${rec.id}'` });
+    const canonical = serializeRecord(rec);
+    const previous = seen.get(rec.id);
+    if (previous !== undefined) {
+      // merge=union lands the same line twice whenever one record reaches a
+      // branch by two routes. Byte-identical is not a defect — treating it as
+      // one used to fail the whole file, and every caller refuses to index a
+      // file with errors, so a single repeated line disabled the entire
+      // knowledge base. Only genuine id reuse, where one of two different
+      // records would be lost, is worth reporting.
+      if (previous !== canonical) {
+        errors.push({
+          line: lineNo,
+          id: rec.id,
+          message: `id '${rec.id}' is reused with different content — one of the two records would be lost`,
+        });
+      }
       continue;
     }
-    seen.add(rec.id);
+    seen.set(rec.id, canonical);
     records.push(rec);
   }
 

@@ -164,7 +164,10 @@ async function runOneAnalyze(
               : ''),
         );
       }
-    } else if (records.length > 0 && errors.length > 0 && verbose) {
+    } else if (records.length > 0 && errors.length > 0) {
+      // Not gated on `verbose`: skipping records leaves the graph without any
+      // knowledge at all, and analyze is the path the edit hook runs. A silent
+      // skip here reads to an agent as "this project has nothing recorded".
       console.log(chalk.yellow(`  Records skipped — ${errors.length} invalid line(s); run 'shanpan records check'.`));
     }
   } finally {

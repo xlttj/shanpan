@@ -78,8 +78,10 @@ describe('timestamps', () => {
 // ─── ids ─────────────────────────────────────────────────────────────────────
 
 describe('nextId', () => {
-  it('produces a 6-char lowercase hex id', () => {
-    expect(nextId(new Set())).toMatch(/^[0-9a-f]{6}$/);
+  it('produces a 10-char lowercase hex id', () => {
+    // Wide enough that two machines appending in parallel — each checking only
+    // against what it has seen — do not collide and lose a record.
+    expect(nextId(new Set())).toMatch(/^[0-9a-f]{10}$/);
   });
 
   it('never returns an id already taken', () => {
@@ -232,11 +234,22 @@ describe('parseRecords', () => {
     expect(errors[0]?.line).toBe(2);
   });
 
-  it('rejects a duplicate id rather than silently keeping both', () => {
+  it('reports an id reused for different content rather than silently keeping both', () => {
     const text = [serializeRecord(rec()), serializeRecord(rec({ cl: 'different' }))].join('\n');
     const { records, errors } = parseRecords(text);
     expect(records).toHaveLength(1);
-    expect(errors.some((e) => e.message.includes('duplicate id'))).toBe(true);
+    expect(errors.some((e) => e.message.includes('reused with different content'))).toBe(true);
+  });
+
+  // merge=union lands the same line twice whenever a record reaches a branch by
+  // two routes. Every caller refuses to index a file that has errors, so
+  // treating this as one disabled the whole knowledge base over a repeat that
+  // costs nothing.
+  it('collapses a byte-identical repeat without reporting an error', () => {
+    const line = serializeRecord(rec());
+    const { records, errors } = parseRecords([line, line].join('\n'));
+    expect(records).toHaveLength(1);
+    expect(errors).toEqual([]);
   });
 
   it('reports an invalid record without dropping valid neighbours', () => {
