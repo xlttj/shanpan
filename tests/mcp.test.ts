@@ -451,3 +451,76 @@ describe('get_supertypes handler', () => {
     expect(res.content[0]!.text).toContain('No supertypes');
   });
 });
+
+// ─── Write-time notification ─────────────────────────────────────────────────
+// Review is cheapest while the developer still has the code in their head, so
+// a record nothing backs but the agent's word gets put in front of them at the
+// moment it is written.
+
+describe('shouldNotify', () => {
+  it('surfaces bare agent and inferred provenance under the default mode', async () => {
+    const { shouldNotify } = await import('../src/cli/commands/mcp.js');
+    expect(shouldNotify('inferred', 'a')).toBe(true);
+    expect(shouldNotify('inferred', 'i')).toBe(true);
+  });
+
+  it('stays silent when the human said it or a pointer can be opened', async () => {
+    const { shouldNotify } = await import('../src/cli/commands/mcp.js');
+    expect(shouldNotify('inferred', 'u')).toBe(false);
+    expect(shouldNotify('inferred', 'n:src/a.ts:12')).toBe(false);
+    expect(shouldNotify('inferred', 't:tests/a.test.ts')).toBe(false);
+    expect(shouldNotify('inferred', 'd:docs/adr/1.md')).toBe(false);
+    expect(shouldNotify('inferred', 'g:abc1234')).toBe(false);
+  });
+
+  it('honours all and never regardless of provenance', async () => {
+    const { shouldNotify } = await import('../src/cli/commands/mcp.js');
+    expect(shouldNotify('all', 'u')).toBe(true);
+    expect(shouldNotify('never', 'i')).toBe(false);
+  });
+});
+
+describe('handleAddRecord — notification', () => {
+  let projectDir: string;
+
+  beforeEach(() => {
+    projectDir = fs.mkdtempSync(path.join(os.tmpdir(), 'shanpan-notify-'));
+    fs.mkdirSync(path.join(projectDir, '.shanpan'), { recursive: true });
+  });
+
+  afterEach(() => {
+    fs.rmSync(projectDir, { recursive: true, force: true });
+  });
+
+  async function add(args: Record<string, unknown>): Promise<string> {
+    const { handleAddRecord } = await import('../src/cli/commands/mcp.js');
+    const res = await handleAddRecord(projectDir, args as never);
+    return res.content[0]?.text ?? '';
+  }
+
+  it('asks the agent to relay a claim only it asserts', async () => {
+    const text = await add({ kind: 'gotcha', claim: 'the cache key ignores locale', provenance: 'i' });
+    expect(text).toContain('Created record');
+    expect(text).toContain('Unvouched');
+    // The claim is quoted so the agent relays the wording that was stored,
+    // not a paraphrase the developer cannot match against the record.
+    expect(text).toContain('the cache key ignores locale');
+  });
+
+  it('says nothing extra when the human is the source', async () => {
+    const text = await add({ kind: 'gotcha', claim: 'deploys run at noon', provenance: 'u' });
+    expect(text).toContain('Created record');
+    expect(text).not.toContain('Unvouched');
+  });
+
+  it('respects notify: never in the project config', async () => {
+    fs.writeFileSync(
+      path.join(projectDir, '.shanpanrc.json'),
+      JSON.stringify({ knowledge: { notify: 'never' } }),
+      'utf-8',
+    );
+    const text = await add({ kind: 'gotcha', claim: 'something inferred', provenance: 'i' });
+    expect(text).toContain('Created record');
+    expect(text).not.toContain('Unvouched');
+  });
+});

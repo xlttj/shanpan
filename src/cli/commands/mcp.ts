@@ -16,7 +16,10 @@ import {
   formatTs,
   validateRecord,
   missingProvenanceRefs,
+  isUnvouched,
 } from '../../core/records.js';
+import { loadConfig } from '../../core/config.js';
+import type { NotifyMode } from '../../types/config.js';
 import { indexRecords } from '../../core/record-indexer.js';
 import { ancestorDirs } from '../../core/dir-scope.js';
 import { KIND_PRIORITY } from '../../core/record-format.js';
@@ -593,6 +596,28 @@ export interface AddRecordArgs {
  * Append one record. Validates before touching disk so a malformed write
  * cannot corrupt the knowledge file mid-session.
  */
+export function shouldNotify(mode: NotifyMode, pv: string): boolean {
+  if (mode === 'never') return false;
+  if (mode === 'all') return true;
+  return isUnvouched(pv);
+}
+
+/**
+ * Asking the agent to relay the claim is the only review this system has at
+ * write time, and it is the cheapest one it will ever get: the developer still
+ * has the code in their head. It is not a gate — shanpan can classify a record
+ * and instruct, but it cannot make an agent speak. Records that slip through
+ * here are what the drift check and a review surface have to catch later.
+ */
+export function notifyNotice(rec: KnowledgeRecord): string {
+  return (
+    `\n\nUnvouched — provenance '${rec.pv}' cites nothing anyone can open, so only the ` +
+    `developer can tell whether this is true. Quote the claim to them in your next message: ` +
+    `"${rec.cl}". If they correct it, supersede record ${rec.id} now, while the context is ` +
+    `still open — the same correction costs a re-read of the code next week.`
+  );
+}
+
 export async function handleAddRecord(
   projectDir: string,
   args: AddRecordArgs,
@@ -640,7 +665,9 @@ export async function handleAddRecord(
   }
 
   appendRecords(projectDir, [rec]);
-  return textResult(`Created record ${rec.id} (${rec.kn}). Call reindex to make it queryable.`);
+  const base = `Created record ${rec.id} (${rec.kn}). Call reindex to make it queryable.`;
+  const notify = shouldNotify(loadConfig(projectDir).knowledge.notify, rec.pv);
+  return textResult(notify ? base + notifyNotice(rec) : base);
 }
 
 export async function runMcp(options: { projectDir?: string } = {}): Promise<void> {

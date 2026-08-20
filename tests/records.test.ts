@@ -15,6 +15,7 @@ import {
   knowledgePath,
   provenancePointers,
   missingProvenanceRefs,
+  isUnvouched,
 } from '../src/core/records.js';
 import { indexRecords, provenanceKind } from '../src/core/record-indexer.js';
 import { openDatabase, closeDatabase, queryAll, dropAndRecreateSchema, migrateLegacyLayout } from '../src/core/db.js';
@@ -976,5 +977,25 @@ describe('migrateLegacyLayout', () => {
     // The live layout wins; the stale legacy dir is left for the user to remove.
     expect(fs.readFileSync(path.join(dir, '.shanpan', 'knowledge.ndjson'), 'utf-8')).toBe('current\n');
     expect(fs.existsSync(path.join(dir, '.specgraph'))).toBe(true);
+  });
+});
+
+// ─── isUnvouched ─────────────────────────────────────────────────────────────
+// The test is "can anyone check this", not "who typed it".
+
+describe('isUnvouched', () => {
+  it('is true for the tokens that cite nothing', () => {
+    expect(isUnvouched('a')).toBe(true);
+    expect(isUnvouched('i')).toBe(true);
+  });
+
+  it('is false when the human said it', () => {
+    expect(isUnvouched('u')).toBe(false);
+  });
+
+  it('is false for every pointer form, which names something openable', () => {
+    for (const pv of ['g:abc1234', 't:tests/a.test.ts', 'n:src/a.ts:3', 'd:docs/x.md']) {
+      expect(isUnvouched(pv)).toBe(false);
+    }
   });
 });

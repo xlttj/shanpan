@@ -32,7 +32,9 @@ shanpan records index   # rebuild only the graph's Record nodes from .shanpan/kn
 
 `shanpan init` detects which AI coding tool the project uses and installs agent skills and hooks automatically. Supported tools: **Claude Code**, **Cursor**, **OpenCode**. Skills are written to the tool's client directory (e.g. `.claude/skills/`); hooks wire `shanpan analyze` and `shanpan check` into the agent's file-edit and session-end events.
 
-Configuration is stored in `.shanpanrc.json` at the project root. If the file already exists when `init` runs it is left untouched. By default only TypeScript is parsed; widen it via `analyze.languages`, e.g. `{ "analyze": { "languages": ["typescript", "python", "php", "sql"] } }`.
+Configuration is stored in `.shanpanrc.json` at the project root and is meant to be committed, so a teammate's clone analyzes the same paths and languages instead of silently falling back to the defaults. If the file already exists when `init` runs it is left untouched. By default only TypeScript is parsed; widen it via `analyze.languages`, e.g. `{ "analyze": { "languages": ["typescript", "python", "php", "sql"] } }`.
+
+`knowledge.notify` controls when an agent is asked to tell you about a record it just wrote. The default, `inferred`, covers records whose provenance is `a` or `i` — the ones that cite nothing anyone can open, so you are the only person who can say whether they are true. Set it to `all` to hear about every record, or `never` to switch it off. Checking a claim while the code is still in your head costs a sentence; the same correction weeks later costs re-reading the code first.
 
 Commit `.shanpanrc.json`. It is the file that declares a repository uses shanpan — the graph and the generated skills are all ignored — and committing it means a teammate's fresh clone analyzes the same languages and paths instead of silently falling back to the defaults.
 

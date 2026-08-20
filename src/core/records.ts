@@ -111,6 +111,19 @@ export function provenancePointers(pv: string): string[] {
 }
 
 /**
+ * True when nothing but the agent's own assertion stands behind a claim.
+ *
+ * The test is not "did the agent write it" but "can anyone check it". A
+ * prefixed token names a commit, test, comment or document someone can open;
+ * "u" means the human said it themselves. Bare "a" and "i" cite nothing, so
+ * the only way to find out whether they are true is to ask the developer —
+ * which is exactly what makes them worth surfacing.
+ */
+export function isUnvouched(pv: string): boolean {
+  return pv === 'a' || pv === 'i';
+}
+
+/**
  * Provenance pointers on `rec` that name a local file which is not on disk.
  * A non-empty result means the record cites a source that isn't in the tree —
  * fabricated, or moved since it was written. Filesystem existence is

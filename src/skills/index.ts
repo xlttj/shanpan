@@ -191,6 +191,21 @@ agent will build on it.
 **Never derive a decision or rejected record from code alone.** Code shows what
 is, never why. Those two kinds need a commit message, a document, or the user.
 
+## Say what you recorded
+
+When you write a record whose provenance is "a" or "i", **tell the developer in
+the same message**, quoting the claim. Those two tokens cite nothing anyone can
+open, so you are the only source — and you may be wrong.
+
+"add_record" marks these for you. Do not bury it in a summary at the end of the
+session: say it while the code is still the thing being discussed, because a
+correction now costs one sentence and the same correction next week costs
+re-reading the code first. If the developer corrects you, supersede the record
+immediately.
+
+Records with "u" or a "g:/t:/n:/d:" pointer need no mention — the human either
+said it themselves or can check the source.
+
 ## Corrections: supersede, never edit
 
 Records are immutable. To correct one, write a new record with "supersedes" set
