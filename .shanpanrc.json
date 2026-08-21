@@ -16,6 +16,8 @@
     ]
   },
   "knowledge": {
+    "ref": "refs/shanpan/knowledge",
+    "commit": "auto",
     "notify": "inferred"
   }
 }

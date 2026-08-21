@@ -19,7 +19,26 @@ export interface AnalyzeConfig {
 export const NOTIFY_MODES = ['all', 'inferred', 'never'] as const;
 export type NotifyMode = (typeof NOTIFY_MODES)[number];
 
+/**
+ * Whether appending a record also commits the log to its ref. Only meaningful
+ * when `ref` is set; the commit is local, so "auto" costs nothing but a few
+ * milliseconds and keeps the ref current.
+ */
+export const COMMIT_MODES = ['auto', 'never'] as const;
+export type CommitMode = (typeof COMMIT_MODES)[number];
+
 export interface KnowledgeConfig {
+  /**
+   * Git ref holding the knowledge log, e.g. "refs/shanpan/knowledge". When
+   * null the log lives in the working tree as before.
+   *
+   * A ref rather than a branch on purpose: refs outside refs/heads are shared
+   * across linked worktrees and cannot be checked out, so several worktrees of
+   * one repository see one knowledge state and none of them can block another
+   * by checking it out.
+   */
+  ref: string | null;
+  commit: CommitMode;
   notify: NotifyMode;
 }
 
@@ -35,6 +54,8 @@ export const DEFAULT_CONFIG: ShanpanConfig = {
     languages: ['typescript'],
   },
   knowledge: {
+    ref: null,
+    commit: 'auto',
     notify: 'inferred',
   },
 };

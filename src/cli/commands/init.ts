@@ -8,6 +8,7 @@ import { DEFAULT_CONFIG } from '../../types/config.js';
 import { SKILLS } from '../../skills/index.js';
 import { IDE_INTEGRATIONS, installIdeHooks, installOpenCodePlugin, type IdeIntegration } from '../../core/ide-hooks.js';
 import { installGitHooks } from '../../core/git-hooks.js';
+import { reportEnsureRef } from './ref.js';
 
 const SKILL_CLIENT_DIRS = ['.claude', '.cursor', '.opencode'] as const;
 
@@ -136,6 +137,8 @@ export async function runInit(options: { gitHooks?: boolean } = {}): Promise<voi
   for (const dir of skillDirs) {
     console.log(chalk.green(`✓ Wrote agent skills to ${dir}/`));
   }
+
+  reportEnsureRef(projectDir);
 
   for (const ide of selectedIdes) {
     installIdeHooks(projectDir, ide);

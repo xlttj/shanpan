@@ -10,6 +10,15 @@ import {
   type RecordValidationError,
 } from '../types/record.js';
 import { DB_DIR } from './db.js';
+import { loadConfig } from './config.js';
+import {
+  refSha,
+  readRefText,
+  commitToRef,
+  mergeNdjson,
+  needsRefresh,
+  writeStamp,
+} from './knowledge-ref.js';
 
 export const KNOWLEDGE_FILE = 'knowledge.ndjson';
 export const ARCHIVE_FILE = 'knowledge.archive.ndjson';
@@ -276,10 +285,65 @@ export function parseRecords(text: string): ParseResult {
   return { records, errors };
 }
 
-export function readRecords(projectDir: string): ParseResult {
+// ─── storage: the file, and optionally a ref behind it ───────────────────────
+//
+// These two functions are the whole I/O surface — every read and every write in
+// the codebase goes through them, so where the bytes live is swappable here and
+// nowhere else. With `knowledge.ref` unset they behave exactly as they always
+// did; with it set, the file becomes a cache in front of a git ref.
+
+/**
+ * Bring the cache in line with the ref, merging rather than overwriting so a
+ * record appended just before a failed commit survives.
+ *
+ * Collisions are returned as validation errors because that is the channel
+ * callers already refuse to index on — a merge must never resolve one by
+ * picking a winner, since that destroys a record nobody can get back.
+ */
+function refreshFromRef(projectDir: string): RecordValidationError[] {
+  const ref = loadConfig(projectDir).knowledge.ref;
+  if (ref === null) return [];
+
+  const sha = refSha(projectDir, ref);
+  if (sha === null || !needsRefresh(projectDir, ref, sha)) return [];
+
   const file = knowledgePath(projectDir);
-  if (!fs.existsSync(file)) return { records: [], errors: [] };
-  return parseRecords(fs.readFileSync(file, 'utf-8'));
+  const cached = fs.existsSync(file) ? fs.readFileSync(file, 'utf-8') : '';
+  const { text, conflicts } = mergeNdjson(readRefText(projectDir, ref) ?? '', cached);
+
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(file, text, 'utf-8');
+  writeStamp(projectDir, { ref, sha });
+
+  return conflicts.map((id) => ({
+    line: 0,
+    id,
+    message: `id '${id}' holds different content on ${ref} than locally — one of the two records would be lost`,
+  }));
+}
+
+/** Commit the cache to the ref. A failure is survivable and left to heal. */
+function commitCache(projectDir: string, message: string): void {
+  const { ref, commit } = loadConfig(projectDir).knowledge;
+  if (ref === null || commit !== 'auto') return;
+
+  const file = knowledgePath(projectDir);
+  if (!fs.existsSync(file)) return;
+  const sha = commitToRef(projectDir, ref, fs.readFileSync(file, 'utf-8'), message);
+
+  // Stamping only on success is what makes a failed commit cost nothing: the
+  // stamp still names an older revision, so the next read merges again and
+  // carries the uncommitted record forward.
+  if (sha !== null) writeStamp(projectDir, { ref, sha });
+}
+
+export function readRecords(projectDir: string): ParseResult {
+  const conflicts = refreshFromRef(projectDir);
+  const file = knowledgePath(projectDir);
+  if (!fs.existsSync(file)) return { records: [], errors: conflicts };
+  const result = parseRecords(fs.readFileSync(file, 'utf-8'));
+  result.errors.unshift(...conflicts);
+  return result;
 }
 
 /**
@@ -288,10 +352,17 @@ export function readRecords(projectDir: string): ParseResult {
  */
 export function appendRecords(projectDir: string, recs: KnowledgeRecord[]): void {
   if (recs.length === 0) return;
+  // Merge first: appending to a stale cache and then committing it would drop
+  // whatever reached the ref in the meantime.
+  refreshFromRef(projectDir);
+
   const file = knowledgePath(projectDir);
   fs.mkdirSync(path.dirname(file), { recursive: true });
   const payload = recs.map((r) => serializeRecord(r) + '\n').join('');
   fs.appendFileSync(file, payload, 'utf-8');
+
+  const ids = recs.map((r) => r.id).join(', ');
+  commitCache(projectDir, `knowledge: add ${recs.length} record(s) — ${ids}`);
 }
 
 // ─── supersede chains ────────────────────────────────────────────────────────

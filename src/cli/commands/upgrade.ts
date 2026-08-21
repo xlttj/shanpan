@@ -2,6 +2,7 @@ import chalk from 'chalk';
 import { dbExists } from '../../core/db.js';
 import { installIdeHooks, installOpenCodePlugin } from '../../core/ide-hooks.js';
 import { installGitHooks } from '../../core/git-hooks.js';
+import { reportEnsureRef } from './ref.js';
 import { writeSkills, promptIdeSelection } from './init.js';
 
 export async function runUpgrade(options: { hooks?: boolean; gitHooks?: boolean }): Promise<void> {
@@ -18,6 +19,8 @@ export async function runUpgrade(options: { hooks?: boolean; gitHooks?: boolean 
   for (const dir of skillDirs) {
     console.log(chalk.green(`✓ Updated agent skills in ${dir}/`));
   }
+
+  reportEnsureRef(projectDir);
 
   if (options.gitHooks !== false) {
     const gitHooks = installGitHooks(projectDir);

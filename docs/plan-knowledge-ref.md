@@ -127,7 +127,20 @@ is a gate.
 
 ## Slice 2 — the ref as local storage
 
-**No network. Fully reversible.**
+**No network. Fully reversible. Built.**
+
+Two things worth recording from building it:
+
+**The read cost was measured, not assumed** — the risk list below asks for
+exactly that. With 500 records: **2.53 ms/read without a ref, 6.18 ms with**.
+The difference is almost entirely spawning `git rev-parse` for the cache key.
+Acceptable in absolute terms, so no cache-the-cache-key layer was added: that
+would trade a real correctness property for a few milliseconds nobody notices.
+
+**The clean working tree does not arrive yet.** The cache file is still tracked
+at this point, so an append still shows up in `git status` — the ignore flip is
+slice 3's job. Slice 2 buys the correctness (one knowledge state, merge-safe,
+nothing checked out); the headline benefit comes one slice later.
 
 ### 2.1 New module `src/core/knowledge-ref.ts`
 

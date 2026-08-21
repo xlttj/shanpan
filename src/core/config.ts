@@ -3,8 +3,10 @@ import path from 'node:path';
 import {
   type ShanpanConfig,
   type NotifyMode,
+  type CommitMode,
   DEFAULT_CONFIG,
   NOTIFY_MODES,
+  COMMIT_MODES,
 } from '../types/config.js';
 import { DB_DIR } from './db.js';
 
@@ -29,6 +31,17 @@ function parseConfig(raw: string): ShanpanConfig {
       languages: parsed.analyze?.languages ?? DEFAULT_CONFIG.analyze.languages,
     },
     knowledge: {
+      // A non-empty string or nothing — an empty ref name would send every git
+      // call somewhere undefined, so it reads as "not configured".
+      ref:
+        typeof parsed.knowledge?.ref === 'string' && parsed.knowledge.ref.trim().length > 0
+          ? parsed.knowledge.ref.trim()
+          : DEFAULT_CONFIG.knowledge.ref,
+      commit: oneOf<CommitMode>(
+        parsed.knowledge?.commit,
+        COMMIT_MODES,
+        DEFAULT_CONFIG.knowledge.commit,
+      ),
       notify: oneOf<NotifyMode>(
         parsed.knowledge?.notify,
         NOTIFY_MODES,
