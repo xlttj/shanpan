@@ -36,6 +36,21 @@ function makeProgressCallback(verbose: boolean) {
   };
 }
 
+/** Widest label in the results block, plus a two-space gap to the value. */
+const STAT_LABEL_WIDTH = 15;
+
+/**
+ * One row of the results block, with the value at a shared column.
+ *
+ * Worth a helper rather than counted spaces: the literals drift the moment a
+ * row is added or a label renamed, and the drift is invisible in the source —
+ * you only see it in the output. Padding happens before colouring, because
+ * chalk's escape codes count toward a string's length but not its width.
+ */
+export function statLine(label: string, value: string | number): string {
+  return `  ${chalk.cyan(label.padEnd(STAT_LABEL_WIDTH))}${value}`;
+}
+
 function printResults(
   stats: Awaited<ReturnType<typeof analyzeAndIndex>>,
   verbose: boolean,
@@ -51,10 +66,10 @@ function printResults(
   console.log(chalk.green(label));
   console.log('');
   console.log(chalk.bold('Results:'));
-  console.log(`  ${chalk.cyan('Files scanned')}         ${stats.filesScanned}`);
-  console.log(`  ${chalk.cyan('Symbols found')}     ${stats.symbolsFound}`);
-  console.log(`  ${chalk.cyan('Files indexed')}     ${stats.fileNodesCreated}`);
-  console.log(`  ${chalk.cyan('Call edges')}        ${stats.callEdgesCreated}`);
+  console.log(statLine('Files scanned', stats.filesScanned));
+  console.log(statLine('Symbols found', stats.symbolsFound));
+  console.log(statLine('Files indexed', stats.fileNodesCreated));
+  console.log(statLine('Call edges', stats.callEdgesCreated));
   if (stats.parseErrors > 0) {
     console.log(chalk.yellow(`  Parse errors: ${stats.parseErrors}`));
   }
@@ -158,7 +173,7 @@ async function runOneAnalyze(
       const recStats = await indexRecords(conn, records, projectDir);
       if (verbose) {
         console.log(
-          chalk.cyan('  Records') + `           ${recStats.live} live` +
+          statLine('Records', `${recStats.live} live`) +
             (recStats.unresolved.length > 0
               ? chalk.yellow(` · ${recStats.unresolved.length} unresolved subject(s)`)
               : ''),

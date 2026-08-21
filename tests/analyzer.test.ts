@@ -226,3 +226,38 @@ describe('analyzeAndIndex', () => {
     expect(Number(helper.rows[0]?.['n'])).toBe(0);
   });
 });
+
+// ─── results formatting ──────────────────────────────────────────────────────
+// The columns were hand-counted spaces and had drifted apart. Misalignment is
+// invisible in the source — it only shows in the output — so it needs a test
+// rather than a careful reader.
+
+const ANSI = /\u001b\[[0-9;]*m/g;
+
+describe('statLine', () => {
+  it('puts every value at the same column regardless of label length', async () => {
+    const { statLine } = await import('../src/cli/commands/analyze.js');
+    const rows: [string, string | number][] = [
+      ['Files scanned', 42],
+      ['Symbols found', 333],
+      ['Call edges', 11],
+      ['Records', '84 live'],
+    ];
+    // The value sits at the end, so its start column is what is left once its
+    // own width is taken off. Strip colour first: escape codes add length, not
+    // width. Measuring with /\S+$/ instead would find the last *word* — and
+    // read "84 live" as starting at "live".
+    const columns = rows.map(([label, value]) => {
+      const plain = statLine(label, value).replace(ANSI, '');
+      return plain.length - String(value).length;
+    });
+    expect(new Set(columns).size).toBe(1);
+  });
+
+  it('keeps the two-space indent and appends the value unchanged', async () => {
+    const { statLine } = await import('../src/cli/commands/analyze.js');
+    const plain = statLine('Records', '84 live').replace(ANSI, '');
+    expect(plain.startsWith('  Records')).toBe(true);
+    expect(plain.endsWith('84 live')).toBe(true);
+  });
+});
