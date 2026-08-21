@@ -4,7 +4,7 @@ Shanpan parses your codebase into a knowledge graph — files, classes, methods,
 
 ## Requirements
 
-Node.js 20 or later. `npm install` compiles native tree-sitter grammars, so a C/C++ toolchain must be available.
+Node.js 20, 22, 24 or 26 — each verified by running the test suite against a clean install. The tree-sitter grammars are native modules; `npm install` uses a prebuilt binary where one exists for your platform and compiles from source otherwise, so a C/C++ toolchain is needed as a fallback. Building from source requires a compiler with C++20 support on Node 24 and later, because V8's headers now demand it.
 
 ## Install
 
