@@ -6,16 +6,18 @@ environment the feature was built in. The automated suite covers the logic
 a local bare repository. What is left needs a real remote, real worktrees, and a
 real editor session.
 
-**The blocker to settle first is step 2.** The build environment's proxy refuses
-to push anything outside `refs/heads` (HTTP 403). Narrowed down by control
-tests: a custom ref is refused, a **tag is refused too**, and a branch goes
-through. That pattern is a proxy namespace policy, not a GitHub restriction —
-GitHub itself takes custom refs from anyone who can push at all. So this very
-likely works on your machine, and step 2 is expected to pass rather than fail.
+**Step 2 is settled: pushing a custom ref to GitHub works.** It was the one
+unknown the rest depended on, and it has now been confirmed against the real
+remote over SSH.
 
-If it does fail anyway, the approach needs a different transport, and **step 7
-must not be attempted** — untracking the knowledge file while the ref cannot
-leave your laptop would strand every record on one machine.
+The build environment's proxy refuses anything outside `refs/heads` (HTTP 403),
+which is why the automated tests use a local bare repository. Control tests
+there showed a tag being refused as well while a branch went through — a proxy
+namespace policy, and not something GitHub does.
+
+The rule that remains: if a push ever does fail on a given host, **step 7 must
+not be attempted there** — untracking the knowledge file while the ref cannot
+leave one machine would strand every record on it.
 
 Steps 1–6 are safe and reversible. Step 7 is the one that changes how the
 repository stores knowledge; step 8 undoes it.

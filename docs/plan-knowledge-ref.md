@@ -220,14 +220,23 @@ no ancestor, and the second push is rejected forever. Committing the merged log
 with the fetched tip as a second parent makes the remote's tip an ancestor, so
 the push fast-forwards. Without that the retry loop would spin until it gave up.
 
-**The migration is documented, not performed.** In this environment the proxy
-refuses to push anything outside `refs/heads` — `git push origin
-refs/shanpan/knowledge` returns HTTP 403, the same class of block as deleting a
-branch. Untracking the knowledge file here would leave every record on a ref
-that cannot leave the container, and lose them when it is reclaimed. So the
-ignore flip stays a documented procedure in the README, and this repository
-keeps its knowledge file tracked. The order matters for anyone doing it: seed
-the ref, sync it to the remote, and only then `git rm --cached`.
+**Pushing a custom ref to GitHub works** — confirmed against the real remote
+over SSH, so the transport this whole slice rests on is sound. It could not be
+shown from the build environment, whose proxy refuses anything outside
+`refs/heads` with HTTP 403 (a tag is refused too, a branch is not — a namespace
+policy of that proxy, not of GitHub).
+
+**The migration is documented, not performed here.** Untracking the knowledge
+file from inside that environment would leave every record on a ref that cannot
+leave the container. So the ignore flip stays a written procedure, and the
+order in it is what matters: seed the ref, sync it to the remote, verify it
+arrived, and only then `git rm --cached`.
+
+One credential detail the first real run surfaced: git opens `/dev/tty`
+directly to ask for a password, so a sync from a hook would hang invisibly
+rather than fail. Prompts are now allowed only when a human is watching, and
+the resulting error names the cause — an https remote on an SSH-authenticated
+machine, or a key that is not in the agent.
 
 ### 3.1 Push and pull
 
