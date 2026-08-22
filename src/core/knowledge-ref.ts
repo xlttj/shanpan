@@ -143,6 +143,31 @@ export function commitToRef(
 
 // ─── moving the ref between machines ─────────────────────────────────────────
 
+/**
+ * Environment for the two operations that talk to a remote.
+ *
+ * Git opens `/dev/tty` directly for credential prompts, so redirecting stdio
+ * does not stop it asking — a sync running from `post-merge` or a session-start
+ * hook would sit there forever, invisibly, waiting for a password nobody is
+ * being shown. Prompts are therefore allowed only when a human is actually
+ * watching this run.
+ *
+ * Credential *helpers* keep working either way: the keychain, libsecret and
+ * ssh-agent all answer without a terminal. Only the raw prompt is suppressed,
+ * which turns an indefinite hang into an error message naming the cause.
+ */
+function networkEnv(): NodeJS.ProcessEnv {
+  if (process.stdout.isTTY) return process.env;
+  const ssh = process.env['GIT_SSH_COMMAND'] ?? 'ssh';
+  return {
+    ...process.env,
+    GIT_TERMINAL_PROMPT: '0',
+    // BatchMode leaves agent and keyfile auth untouched; it only stops ssh
+    // asking for a passphrase it has no way to display here.
+    GIT_SSH_COMMAND: `${ssh} -o BatchMode=yes`,
+  };
+}
+
 export interface Fetched {
   sha: string;
   text: string;
@@ -155,7 +180,16 @@ export interface Fetched {
  * ordinary state of the first machine to push.
  */
 export function fetchRef(projectDir: string, remote: string, ref: string): Fetched | null {
-  if (git(projectDir, ['fetch', '--quiet', remote, ref]) === null) return null;
+  try {
+    execFileSync('git', ['fetch', '--quiet', remote, ref], {
+      cwd: projectDir,
+      encoding: 'utf-8',
+      env: networkEnv(),
+      stdio: ['pipe', 'pipe', 'pipe'],
+    });
+  } catch {
+    return null;
+  }
   const sha = git(projectDir, ['rev-parse', '--verify', '--quiet', 'FETCH_HEAD'])?.trim();
   if (!sha) return null;
   return { sha, text: git(projectDir, ['show', `FETCH_HEAD:${REF_BLOB_NAME}`]) ?? '' };
@@ -181,6 +215,7 @@ export function pushRef(projectDir: string, remote: string, ref: string): PushRe
     execFileSync('git', ['push', '--quiet', remote, `${ref}:${ref}`], {
       cwd: projectDir,
       encoding: 'utf-8',
+      env: networkEnv(),
       stdio: ['pipe', 'pipe', 'pipe'],
     });
     return { ok: true, retryable: false, message: '' };

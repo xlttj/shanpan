@@ -2,6 +2,30 @@ import chalk from 'chalk';
 import { syncKnowledge } from '../../core/knowledge-sync.js';
 
 /**
+ * Turn git's authentication wording into the thing to actually go and change.
+ *
+ * Worth the special case because sync runs from hooks, where terminal prompts
+ * are switched off deliberately — so an HTTPS remote on a machine that
+ * authenticates over SSH fails here with a message about disabled prompts,
+ * which describes the symptom and hides the cause.
+ */
+export function credentialHint(error: string): string | null {
+  if (/could not read Username|terminal prompts disabled|Authentication failed|403/i.test(error)) {
+    return (
+      "  git could not authenticate. If `git remote -v` shows an https:// URL but you log in with an SSH key,\n" +
+      '  switch it: git remote set-url <remote> git@github.com:<owner>/<repo>.git'
+    );
+  }
+  if (/Permission denied \(publickey\)|Host key verification/i.test(error)) {
+    return (
+      '  ssh could not authenticate without asking. Load the key into your agent first:\n' +
+      '  ssh-add ~/.ssh/id_ed25519   (prompts are disabled when sync runs from a hook)'
+    );
+  }
+  return null;
+}
+
+/**
  * Exchange knowledge with the remote.
  *
  * Quiet mode exists because the git hooks call this on every checkout and
@@ -41,6 +65,8 @@ export function runSync(options: { quiet?: boolean } = {}): void {
       // between them sends people to fix the wrong thing.
       console.log(chalk.yellow(`Could not push ${result.ref} — git said:`));
       console.log(chalk.gray(`  ${result.error.split('\n').join('\n  ')}`));
+      const hint = credentialHint(result.error);
+      if (hint !== null) console.log(chalk.gray(hint));
       console.log(chalk.gray('Everything is committed locally; nothing is lost.'));
       return;
 

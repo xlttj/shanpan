@@ -71,8 +71,16 @@ git ls-remote origin 'refs/shanpan/*'
 **If it fails**, sync now quotes git verbatim instead of guessing. Read what it
 says:
 
-- `403` / `denied` / `permission` → the host or a proxy is refusing custom refs.
-  This is the blocker. Stop here and skip to step 8; do not attempt step 7.
+- `could not read Username` / `Authentication failed` → the remote is an
+  `https://` URL while you authenticate over SSH. `git remote -v` to confirm,
+  then `git remote set-url origin git@github.com:<owner>/<repo>.git`. Sync
+  prints this hint itself.
+- `Permission denied (publickey)` → the key is not in your agent. `ssh-add`
+  it; prompts are switched off when sync runs from a hook, so an unloaded key
+  fails rather than asking.
+- `403` / `denied` / `permission` with an SSH remote → the host or a proxy is
+  refusing custom refs. This is the blocker. Stop here and skip to step 8; do
+  not attempt step 7.
 - `does not appear to be a git repository` → wrong `knowledge.remote`.
 - anything about `non-fast-forward` → someone else pushed; run `shanpan sync`
   again, it is built to converge.

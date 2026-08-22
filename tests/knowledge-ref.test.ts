@@ -417,3 +417,30 @@ describe('refDeclaredButAbsent', () => {
     expect(refDeclaredButAbsent(projectDir)).toBeNull();
   });
 });
+
+// ─── credential failures ─────────────────────────────────────────────────────
+// Sync runs from hooks with terminal prompts switched off, so an HTTPS remote
+// on an SSH-authenticated machine fails with wording about disabled prompts —
+// which names the symptom and hides the cause.
+
+describe('credentialHint', () => {
+  it('points at the remote URL when git cannot authenticate', async () => {
+    const { credentialHint } = await import('../src/cli/commands/sync.js');
+    for (const msg of [
+      "fatal: could not read Username for 'https://github.com': terminal prompts disabled",
+      'remote: Authentication failed for https://github.com/x/y.git',
+    ]) {
+      expect(credentialHint(msg)).toContain('remote set-url');
+    }
+  });
+
+  it('points at the ssh agent when the key is not loaded', async () => {
+    const { credentialHint } = await import('../src/cli/commands/sync.js');
+    expect(credentialHint('git@github.com: Permission denied (publickey).')).toContain('ssh-add');
+  });
+
+  it('stays quiet for failures that are not about credentials', async () => {
+    const { credentialHint } = await import('../src/cli/commands/sync.js');
+    expect(credentialHint("fatal: 'nope' does not appear to be a git repository")).toBeNull();
+  });
+});
