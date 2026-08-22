@@ -37,12 +37,28 @@ const CLAUDE_HOOKS_CONFIG = {
         ],
       },
     ],
+    SessionStart: [
+      {
+        hooks: [
+          {
+            type: 'command',
+            command: 'shanpan sync --quiet > /dev/null 2>&1',
+            async: true,
+          },
+        ],
+      },
+    ],
     Stop: [
       {
         hooks: [
           {
             type: 'command',
             command: 'shanpan check --hook-output',
+          },
+          {
+            type: 'command',
+            command: 'shanpan sync --quiet > /dev/null 2>&1',
+            async: true,
           },
         ],
       },
@@ -71,14 +87,20 @@ export const claudeCodeIntegration: IdeIntegration = {
 const CURSOR_HOOKS_CONFIG = {
   version: 1,
   hooks: {
-    sessionStart: [{ command: 'shanpan rules > /dev/null 2>&1' }],
+    sessionStart: [
+      { command: 'shanpan sync --quiet > /dev/null 2>&1' },
+      { command: 'shanpan rules > /dev/null 2>&1' },
+    ],
     postToolUse: [
       {
         matcher: 'Write',
         command: 'shanpan analyze > /dev/null 2>&1 && shanpan rules > /dev/null 2>&1',
       },
     ],
-    stop: [{ command: 'shanpan check --hook-output --format cursor' }],
+    stop: [
+      { command: 'shanpan check --hook-output --format cursor' },
+      { command: 'shanpan sync --quiet > /dev/null 2>&1' },
+    ],
   },
 };
 

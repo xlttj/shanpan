@@ -4,9 +4,11 @@ import {
   type ShanpanConfig,
   type NotifyMode,
   type CommitMode,
+  type SyncMode,
   DEFAULT_CONFIG,
   NOTIFY_MODES,
   COMMIT_MODES,
+  SYNC_MODES,
 } from '../types/config.js';
 import { DB_DIR } from './db.js';
 
@@ -42,6 +44,12 @@ function parseConfig(raw: string): ShanpanConfig {
         COMMIT_MODES,
         DEFAULT_CONFIG.knowledge.commit,
       ),
+      remote:
+        typeof parsed.knowledge?.remote === 'string' && parsed.knowledge.remote.trim().length > 0
+          ? parsed.knowledge.remote.trim()
+          : DEFAULT_CONFIG.knowledge.remote,
+      pull: oneOf<SyncMode>(parsed.knowledge?.pull, SYNC_MODES, DEFAULT_CONFIG.knowledge.pull),
+      push: oneOf<SyncMode>(parsed.knowledge?.push, SYNC_MODES, DEFAULT_CONFIG.knowledge.push),
       notify: oneOf<NotifyMode>(
         parsed.knowledge?.notify,
         NOTIFY_MODES,

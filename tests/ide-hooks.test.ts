@@ -93,21 +93,32 @@ describe('cursor integration', () => {
     expect(s.hooks.stop[0].command).toContain('--format cursor');
   });
 
+  // Asserted on the set of commands rather than on a position: an event may
+  // carry several hooks, and an index only records which happened to be added
+  // first.
+  const commandsFor = (hooks: { command: string }[]): string => hooks.map((h) => h.command).join(' | ');
+
   it('regenerates rules on session start and after edits', () => {
     installIdeHooks(tmpDir, cursorIntegration);
     const s = readSettings('.cursor/hooks.json') as any;
-    expect(s.hooks.sessionStart[0].command).toContain('shanpan rules');
-    expect(s.hooks.postToolUse[0].command).toContain('shanpan rules');
+    expect(commandsFor(s.hooks.sessionStart)).toContain('shanpan rules');
+    expect(commandsFor(s.hooks.postToolUse)).toContain('shanpan rules');
     expect(s.hooks.postToolUse[0].matcher).toBe('Write');
+  });
+
+  it('syncs knowledge at both ends of a session', () => {
+    installIdeHooks(tmpDir, cursorIntegration);
+    const s = readSettings('.cursor/hooks.json') as any;
+    expect(commandsFor(s.hooks.sessionStart)).toContain('shanpan sync');
+    expect(commandsFor(s.hooks.stop)).toContain('shanpan sync');
   });
 
   it('is idempotent — running twice does not duplicate hooks', () => {
     installIdeHooks(tmpDir, cursorIntegration);
+    const once = readSettings('.cursor/hooks.json') as any;
     installIdeHooks(tmpDir, cursorIntegration);
-    const s = readSettings('.cursor/hooks.json') as any;
-    expect(s.hooks.sessionStart).toHaveLength(1);
-    expect(s.hooks.postToolUse).toHaveLength(1);
-    expect(s.hooks.stop).toHaveLength(1);
+    const twice = readSettings('.cursor/hooks.json') as any;
+    expect(twice.hooks).toEqual(once.hooks);
   });
 
   it('does not install a preToolUse context hook, which Cursor would discard', () => {

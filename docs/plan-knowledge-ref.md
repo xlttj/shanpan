@@ -203,7 +203,31 @@ absent) and does the same thing on the way through.
 
 ## Slice 3 — push, pull, migration
 
-**The first slice that is hard to undo.**
+**The first slice that is hard to undo. Built, except the migration.**
+
+Three things the build changed or discovered:
+
+**The sync modes are auto/never, not session-start/session-end.** The moment is
+already decided by whichever hook calls sync, so a setting naming a moment
+would be describing the hook's job — and the two could then contradict each
+other. The config answers *whether*, the hook answers *when*. `pull: on-read`
+was dropped outright: reads happen on nearly every MCP call, and a network
+round trip on each would make the graph feel broken on a train.
+
+**Push needs a merge commit, not just matching content.** Two machines that
+each commit before either pushes produce histories that share every record and
+no ancestor, and the second push is rejected forever. Committing the merged log
+with the fetched tip as a second parent makes the remote's tip an ancestor, so
+the push fast-forwards. Without that the retry loop would spin until it gave up.
+
+**The migration is documented, not performed.** In this environment the proxy
+refuses to push anything outside `refs/heads` — `git push origin
+refs/shanpan/knowledge` returns HTTP 403, the same class of block as deleting a
+branch. Untracking the knowledge file here would leave every record on a ref
+that cannot leave the container, and lose them when it is reclaimed. So the
+ignore flip stays a documented procedure in the README, and this repository
+keeps its knowledge file tracked. The order matters for anyone doing it: seed
+the ref, sync it to the remote, and only then `git rm --cached`.
 
 ### 3.1 Push and pull
 

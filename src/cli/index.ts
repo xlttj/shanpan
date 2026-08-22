@@ -6,6 +6,7 @@ import { runMcp } from './commands/mcp.js';
 import { runAnalyze } from './commands/analyze.js';
 import { runCheck, parseHookFormat } from './commands/check.js';
 import { runUpgrade } from './commands/upgrade.js';
+import { runSync } from './commands/sync.js';
 import { runContext } from './commands/context.js';
 import { runRules } from './commands/rules.js';
 import { runBootstrap } from './commands/bootstrap.js';
@@ -70,6 +71,12 @@ program
   .option('--hooks', 'Also update IDE hook settings')
   .option('--no-git-hooks', 'Do not (re)install git hooks')
   .action((opts) => runUpgrade({ hooks: !!opts.hooks, gitHooks: opts.gitHooks as boolean }));
+
+program
+  .command('sync')
+  .description('Exchange knowledge records with the remote')
+  .option('--quiet', 'Say nothing unless something changed (used by the git hooks)')
+  .action((opts) => runSync({ quiet: !!opts.quiet }));
 
 program
   .command('check')

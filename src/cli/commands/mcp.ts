@@ -19,6 +19,7 @@ import {
   isUnvouched,
 } from '../../core/records.js';
 import { loadConfig } from '../../core/config.js';
+import { isGitRepo, refSha } from '../../core/knowledge-ref.js';
 import type { NotifyMode } from '../../types/config.js';
 import { indexRecords } from '../../core/record-indexer.js';
 import { ancestorDirs } from '../../core/dir-scope.js';
@@ -91,6 +92,8 @@ export async function handleServerInfo(
       await closeDatabase(db, conn);
     }
   }
+  const ref = loadConfig(projectDir).knowledge.ref;
+  const refPresent = ref === null ? null : refSha(projectDir, ref) !== null;
   return jsonResult({
     version: '0.1.0',
     server_build: skew.serverBuild,
@@ -98,7 +101,13 @@ export async function handleServerInfo(
     in_sync: skew.inSync,
     symbols,
     records,
-    advice: skew.advice,
+    knowledge_ref: ref,
+    knowledge_ref_present: refPresent,
+    advice:
+      refPresent === false
+        ? `${skew.advice} Also: the knowledge ref ${ref} is declared but absent in this clone — ` +
+          "run 'shanpan sync' to fetch it, or every record read will look like an empty knowledge base."
+        : skew.advice,
   });
 }
 
@@ -111,9 +120,23 @@ async function graphMissingRecords(projectDir: string, conn: Connection): Promis
 }
 
 /**
- * A record read returned nothing. Distinguish "genuinely no records" from
- * "records exist on disk but the graph has none" — the latter is stale data
- * masquerading as absence, which an agent would otherwise trust.
+ * The knowledge lives on a ref that this clone has never fetched.
+ *
+ * Almost always an agent sandbox — a fresh container or worktree where nobody
+ * ran init. Left unsaid it is the worst kind of failure: an empty knowledge
+ * base looks exactly like a project that has never recorded anything, so the
+ * agent proceeds confidently with nothing.
+ */
+export function refDeclaredButAbsent(projectDir: string): string | null {
+  const { ref } = loadConfig(projectDir).knowledge;
+  if (ref === null || !isGitRepo(projectDir)) return null;
+  return refSha(projectDir, ref) === null ? ref : null;
+}
+
+/**
+ * A record read returned nothing. Distinguish "genuinely no records" from the
+ * two ways absence can be a lie: the graph is stale, or the knowledge simply
+ * has not been fetched. Both would otherwise be trusted as "nothing is known".
  */
 async function emptyRecordResult(
   projectDir: string,
@@ -125,6 +148,14 @@ async function emptyRecordResult(
       `shanpan: knowledge.ndjson holds ${onDisk} record(s) but none are indexed in the graph. ` +
         "Run 'shanpan records index' (or call the reindex tool) to make them queryable. " +
         'This is stale data, not an empty knowledge base.',
+    );
+  }
+  const missingRef = refDeclaredButAbsent(projectDir);
+  if (missingRef !== null) {
+    return textResult(
+      `shanpan: this project keeps its knowledge on ${missingRef}, which this clone does not have. ` +
+        "Run 'shanpan sync' to fetch it. " +
+        'This is knowledge that has not been fetched, not an empty knowledge base.',
     );
   }
   return jsonResult([]);

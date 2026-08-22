@@ -27,6 +27,21 @@ export type NotifyMode = (typeof NOTIFY_MODES)[number];
 export const COMMIT_MODES = ['auto', 'never'] as const;
 export type CommitMode = (typeof COMMIT_MODES)[number];
 
+/**
+ * Whether `shanpan sync` fetches before merging and pushes after committing.
+ *
+ * Deliberately not session-start/session-end: the moment is already decided by
+ * whichever hook calls sync, so a setting naming a moment would describe the
+ * hook's job and the two could contradict each other. The config answers
+ * *whether*, the hook answers *when*.
+ *
+ * There is no fetch-on-every-read mode either. Reads happen on nearly every
+ * MCP call, and a network round trip on each would make the graph feel broken
+ * the first time someone works on a train.
+ */
+export const SYNC_MODES = ['auto', 'never'] as const;
+export type SyncMode = (typeof SYNC_MODES)[number];
+
 export interface KnowledgeConfig {
   /**
    * Git ref holding the knowledge log, e.g. "refs/shanpan/knowledge". When
@@ -39,6 +54,10 @@ export interface KnowledgeConfig {
    */
   ref: string | null;
   commit: CommitMode;
+  /** Remote the ref is synced with. */
+  remote: string;
+  pull: SyncMode;
+  push: SyncMode;
   notify: NotifyMode;
 }
 
@@ -56,6 +75,9 @@ export const DEFAULT_CONFIG: ShanpanConfig = {
   knowledge: {
     ref: null,
     commit: 'auto',
+    remote: 'origin',
+    pull: 'auto',
+    push: 'auto',
     notify: 'inferred',
   },
 };

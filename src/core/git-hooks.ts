@@ -27,6 +27,7 @@ export const GIT_HOOKS: Record<string, string> = {
     'root=$(git rev-parse --show-toplevel 2>/dev/null) || exit 0',
     'cd "$root" || exit 0',
     '[ -f .shanpan/graph.db ] || exit 0',
+    'shanpan sync --quiet 2>/dev/null || true',
     'shanpan analyze >/dev/null 2>&1 || true',
   ].join('\n'),
 
@@ -35,6 +36,7 @@ export const GIT_HOOKS: Record<string, string> = {
     'root=$(git rev-parse --show-toplevel 2>/dev/null) || exit 0',
     'cd "$root" || exit 0',
     '[ -f .shanpan/graph.db ] || exit 0',
+    'shanpan sync --quiet 2>/dev/null || true',
     'shanpan analyze >/dev/null 2>&1 || true',
   ].join('\n'),
 

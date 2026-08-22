@@ -108,6 +108,7 @@ export function commitToRef(
   ref: string,
   text: string,
   message: string,
+  extraParents: string[] = [],
 ): string | null {
   const blob = git(projectDir, ['hash-object', '-w', '--stdin'], text)?.trim();
   if (!blob) return null;
@@ -116,7 +117,11 @@ export function commitToRef(
   if (!tree) return null;
 
   const parent = refSha(projectDir, ref);
-  const args = ['commit-tree', tree, ...(parent ? ['-p', parent] : []), '-m', message];
+  // A second parent is what makes the push a fast-forward after a fetch: the
+  // remote tip becomes an ancestor, so the remote accepts the result instead of
+  // rejecting two histories that merely happen to share content.
+  const parents = [...(parent ? [parent] : []), ...extraParents.filter((p) => p !== parent)];
+  const args = ['commit-tree', tree, ...parents.flatMap((p) => ['-p', p]), '-m', message];
   let commit: string | undefined;
   try {
     commit = execFileSync('git', args, {
@@ -134,6 +139,62 @@ export function commitToRef(
   // is refused rather than silently overwritten.
   const update = git(projectDir, ['update-ref', ref, commit, ...(parent ? [parent] : [''])]);
   return update === null ? null : commit;
+}
+
+// ─── moving the ref between machines ─────────────────────────────────────────
+
+export interface Fetched {
+  sha: string;
+  text: string;
+}
+
+/**
+ * Fetch the ref from a remote without moving any local ref — the result lands
+ * in FETCH_HEAD, so nothing local is overwritten before the merge decides what
+ * to keep. Returns null when the remote has no such ref yet, which is the
+ * ordinary state of the first machine to push.
+ */
+export function fetchRef(projectDir: string, remote: string, ref: string): Fetched | null {
+  if (git(projectDir, ['fetch', '--quiet', remote, ref]) === null) return null;
+  const sha = git(projectDir, ['rev-parse', '--verify', '--quiet', 'FETCH_HEAD'])?.trim();
+  if (!sha) return null;
+  return { sha, text: git(projectDir, ['show', `FETCH_HEAD:${REF_BLOB_NAME}`]) ?? '' };
+}
+
+export interface PushResult {
+  ok: boolean;
+  /**
+   * True only for the losing-a-race kind of failure, where the remote moved
+   * and fetching again would help. Anything else — no permission, no network,
+   * an unknown remote — is not worth retrying, and reporting it as contention
+   * would name a cause we did not observe.
+   */
+  retryable: boolean;
+  message: string;
+}
+
+const REJECTED = /\[rejected\]|non-fast-forward|fetch first|stale info/i;
+
+/** Push the ref, reporting whether a retry could plausibly succeed. */
+export function pushRef(projectDir: string, remote: string, ref: string): PushResult {
+  try {
+    execFileSync('git', ['push', '--quiet', remote, `${ref}:${ref}`], {
+      cwd: projectDir,
+      encoding: 'utf-8',
+      stdio: ['pipe', 'pipe', 'pipe'],
+    });
+    return { ok: true, retryable: false, message: '' };
+  } catch (err) {
+    const e = err as { stderr?: string; message?: string };
+    const message = (e.stderr ?? e.message ?? 'push failed').trim();
+    return { ok: false, retryable: REJECTED.test(message), message };
+  }
+}
+
+/** True when `maybeAncestor` is already contained in `tip`'s history. */
+export function isAncestor(projectDir: string, maybeAncestor: string, tip: string | null): boolean {
+  if (tip === null) return false;
+  return git(projectDir, ['merge-base', '--is-ancestor', maybeAncestor, tip]) !== null;
 }
 
 // ─── merging two logs ────────────────────────────────────────────────────────

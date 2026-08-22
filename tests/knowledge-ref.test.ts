@@ -247,3 +247,173 @@ describe('records with knowledge.ref set', () => {
     expect(readStamp(projectDir)).toBeNull();
   });
 });
+
+// ─── sync between two clones ─────────────────────────────────────────────────
+// Exercised against a local bare remote: no network, deterministic, and it
+// covers exactly the paths that matter — fetch, merge, the merge-commit parent
+// that makes a push fast-forward, and the retry after a rejection.
+
+describe('syncKnowledge', () => {
+  let bare: string;
+  let alice: string;
+  let bob: string;
+
+  function run(dir: string, ...args: string[]): string {
+    return execFileSync('git', args, { cwd: dir, encoding: 'utf-8' });
+  }
+
+  function clone(name: string): string {
+    const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), `shanpan-${name}-`)));
+    execFileSync('git', ['clone', '-q', bare, dir], { encoding: 'utf-8' });
+    run(dir, 'config', 'user.name', name);
+    run(dir, 'config', 'user.email', `${name}@example.com`);
+    fs.mkdirSync(path.join(dir, '.shanpan'), { recursive: true });
+    fs.writeFileSync(
+      path.join(dir, '.shanpanrc.json'),
+      JSON.stringify({ knowledge: { ref: REF, commit: 'auto', pull: 'auto', push: 'auto' } }),
+      'utf-8',
+    );
+    return dir;
+  }
+
+  beforeEach(() => {
+    bare = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'shanpan-bare-')));
+    execFileSync('git', ['init', '-q', '--bare', bare], { encoding: 'utf-8' });
+    // Point the bare repo's HEAD at the branch the seed pushes, or every clone
+    // warns about a dangling HEAD and buries the real test output.
+    execFileSync('git', ['--git-dir', bare, 'symbolic-ref', 'HEAD', 'refs/heads/main'], {
+      encoding: 'utf-8',
+    });
+
+    const seed = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'shanpan-seed-')));
+    execFileSync('git', ['init', '-q', seed], { encoding: 'utf-8' });
+    run(seed, 'config', 'user.name', 'Seed');
+    run(seed, 'config', 'user.email', 'seed@example.com');
+    run(seed, 'commit', '-q', '--allow-empty', '-m', 'init');
+    run(seed, 'branch', '-M', 'main');
+    run(seed, 'remote', 'add', 'origin', bare);
+    run(seed, 'push', '-q', 'origin', 'main');
+    fs.rmSync(seed, { recursive: true, force: true });
+
+    alice = clone('alice');
+    bob = clone('bob');
+  });
+
+  afterEach(() => {
+    for (const d of [bare, alice, bob]) fs.rmSync(d, { recursive: true, force: true });
+  });
+
+  it('pushes what one machine wrote and hands it to the next', async () => {
+    const { syncKnowledge } = await import('../src/core/knowledge-sync.js');
+
+    appendRecords(alice, [rec({ id: 'fromalice' })]);
+    const pushed = syncKnowledge(alice);
+    expect(pushed.status).toBe('ok');
+    expect(pushed.pushed).toBe(true);
+
+    const got = syncKnowledge(bob);
+    expect(got.gained).toBe(1);
+    expect(readRecords(bob).records.map((r) => r.id)).toEqual(['fromalice']);
+  });
+
+  // The case the merge-commit parent exists for: both sides commit before
+  // either pushes, so the second push is only a fast-forward if the fetched
+  // tip became an ancestor.
+  it('converges when both machines wrote before either synced', async () => {
+    const { syncKnowledge } = await import('../src/core/knowledge-sync.js');
+
+    appendRecords(alice, [rec({ id: 'fromalice' })]);
+    appendRecords(bob, [rec({ id: 'frombob' })]);
+
+    expect(syncKnowledge(alice).pushed).toBe(true);
+    const second = syncKnowledge(bob);
+    expect(second.status).toBe('ok');
+    expect(second.pushed).toBe(true);
+
+    // Bob holds both; Alice picks up Bob's on her next sync.
+    expect(readRecords(bob).records.map((r) => r.id).sort()).toEqual(['fromalice', 'frombob']);
+    syncKnowledge(alice);
+    expect(readRecords(alice).records.map((r) => r.id).sort()).toEqual(['fromalice', 'frombob']);
+  });
+
+  it('writes no commit and reports nothing gained when everything is already shared', async () => {
+    const { syncKnowledge } = await import('../src/core/knowledge-sync.js');
+
+    appendRecords(alice, [rec({ id: 'shared' })]);
+    syncKnowledge(alice);
+    const before = refSha(alice, REF);
+
+    const again = syncKnowledge(alice);
+    expect(again.gained).toBe(0);
+    expect(refSha(alice, REF)).toBe(before); // a quiet repository stays quiet
+  });
+
+  it('never touches either working tree', async () => {
+    const { syncKnowledge } = await import('../src/core/knowledge-sync.js');
+    appendRecords(alice, [rec({ id: 'fromalice' })]);
+    syncKnowledge(alice);
+    syncKnowledge(bob);
+    expect(run(alice, 'status', '--porcelain', '-uno').trim()).toBe('');
+    expect(run(bob, 'status', '--porcelain', '-uno').trim()).toBe('');
+  });
+
+  // A push that cannot happen at all must not be reported as contention: "no
+  // permission" and "lost a race" send people to fix entirely different things.
+  it('stops at once and quotes git when the push is not retryable', async () => {
+    const { syncKnowledge } = await import('../src/core/knowledge-sync.js');
+    run(alice, 'remote', 'set-url', 'origin', path.join(alice, 'does-not-exist.git'));
+    appendRecords(alice, [rec({ id: 'stranded' })]);
+
+    const result = syncKnowledge(alice);
+    expect(result.status).toBe('push-failed');
+    expect(result.attempts).toBe(1); // not three
+    expect(result.error.length).toBeGreaterThan(0);
+    // The record is safe locally even though it reached nobody.
+    expect(readRecords(alice).records.map((r) => r.id)).toEqual(['stranded']);
+  });
+
+  it('does nothing without a ref configured', async () => {
+    const { syncKnowledge } = await import('../src/core/knowledge-sync.js');
+    fs.writeFileSync(path.join(alice, '.shanpanrc.json'), JSON.stringify({}), 'utf-8');
+    expect(syncKnowledge(alice).status).toBe('not-configured');
+  });
+
+  it('commits locally but does not push when push is off', async () => {
+    const { syncKnowledge } = await import('../src/core/knowledge-sync.js');
+    fs.writeFileSync(
+      path.join(alice, '.shanpanrc.json'),
+      JSON.stringify({ knowledge: { ref: REF, commit: 'auto', pull: 'auto', push: 'never' } }),
+      'utf-8',
+    );
+    appendRecords(alice, [rec({ id: 'private' })]);
+    const result = syncKnowledge(alice);
+    expect(result.pushed).toBe(false);
+    expect(refSha(alice, REF)).not.toBeNull();
+    expect(syncKnowledge(bob).gained).toBe(0);
+  });
+});
+
+// ─── the unfetched clone ─────────────────────────────────────────────────────
+// The state an agent sandbox lands in: config committed, ref never fetched.
+// Absence here must never be reported as "nothing is known".
+
+describe('refDeclaredButAbsent', () => {
+  it('names the ref when it is configured but missing', async () => {
+    const { refDeclaredButAbsent } = await import('../src/cli/commands/mcp.js');
+    configureRef(REF);
+    expect(refDeclaredButAbsent(projectDir)).toBe(REF);
+  });
+
+  it('stays silent once the ref is there', async () => {
+    const { refDeclaredButAbsent } = await import('../src/cli/commands/mcp.js');
+    configureRef(REF);
+    ensureRef(projectDir, REF, '');
+    expect(refDeclaredButAbsent(projectDir)).toBeNull();
+  });
+
+  it('stays silent when no ref is configured at all', async () => {
+    const { refDeclaredButAbsent } = await import('../src/cli/commands/mcp.js');
+    configureRef(null);
+    expect(refDeclaredButAbsent(projectDir)).toBeNull();
+  });
+});

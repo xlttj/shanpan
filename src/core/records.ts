@@ -21,7 +21,6 @@ import {
 } from './knowledge-ref.js';
 
 export const KNOWLEDGE_FILE = 'knowledge.ndjson';
-export const ARCHIVE_FILE = 'knowledge.archive.ndjson';
 
 /** Canonical key order — keeps diffs stable across writers. */
 const KEY_ORDER: (keyof KnowledgeRecord)[] = [
@@ -32,9 +31,6 @@ export function knowledgePath(projectDir: string): string {
   return path.join(projectDir, DB_DIR, KNOWLEDGE_FILE);
 }
 
-export function archivePath(projectDir: string): string {
-  return path.join(projectDir, DB_DIR, ARCHIVE_FILE);
-}
 
 // ─── timestamps ──────────────────────────────────────────────────────────────
 
