@@ -7,10 +7,15 @@ a local bare repository. What is left needs a real remote, real worktrees, and a
 real editor session.
 
 **The blocker to settle first is step 2.** The build environment's proxy refuses
-to push anything outside `refs/heads` (HTTP 403). If that also happens on your
-machine, the whole approach needs a different transport, and **step 7 must not
-be attempted** — untracking the knowledge file while the ref cannot leave your
-laptop would strand every record on one machine.
+to push anything outside `refs/heads` (HTTP 403). Narrowed down by control
+tests: a custom ref is refused, a **tag is refused too**, and a branch goes
+through. That pattern is a proxy namespace policy, not a GitHub restriction —
+GitHub itself takes custom refs from anyone who can push at all. So this very
+likely works on your machine, and step 2 is expected to pass rather than fail.
+
+If it does fail anyway, the approach needs a different transport, and **step 7
+must not be attempted** — untracking the knowledge file while the ref cannot
+leave your laptop would strand every record on one machine.
 
 Steps 1–6 are safe and reversible. Step 7 is the one that changes how the
 repository stores knowledge; step 8 undoes it.
